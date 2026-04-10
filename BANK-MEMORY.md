@@ -52,6 +52,8 @@ Gerenciador-Biblioteca-Web/
 │   │   ├── hero.png
 │   │   ├── react.svg
 │   │   └── vite.svg
+│   ├── api/
+│   │   └── booksApi.ts
 │   ├── components/
 │   │   └── BookCard.tsx
 │   ├── hooks/
@@ -66,8 +68,11 @@ Gerenciador-Biblioteca-Web/
 ```
 
 Conexão com o Backend
-* URL base atual: http://localhost:8080
-* Endpoint consumido: GET /books
+* Aplicacao web deve ser executada em http://localhost:8081
+* No browser, a chamada padrao e feita para /api/books
+* O Vite proxy redireciona /api para http://localhost:8080 durante desenvolvimento local
+* Endpoint real consumido: GET http://localhost:8080/books, que corresponde ao BookController.getAllBooks()
+* A URL base pode ser sobrescrita com VITE_API_BASE_URL quando necessario
 * O backend precisa estar rodando antes de abrir o web
 * Se o backend estiver offline, o web exibe: "Biblioteca não encontrada. Verifique se o servidor está rodando."
 
@@ -77,22 +82,34 @@ Interface TypeScript usada pelo frontend:
 * title: string
 * author: string
 * genre: string | null
+* description: string | null
+* coverUrl: string | null
+* isbn: string | null
 * totalPages: number | null
+* publishedYear: number | null
 * currentPage: number | null
-* status: string | null
+* startDate: string | null
+* endDate: string | null
+* status: ReadingStatus | null (NAO_LIDO, LENDO, LIDO, ABANDONADO)
 * bookRating: number | null
 * publisher: string | null
 
 Fluxo Atual
 * App.tsx renderiza BookList
-* BookList usa useBooks para buscar livros e renderiza estados de carregamento, erro, vazio e sucesso
-* useBooks chama GET http://localhost:8080/books com fetch
-* BookCard exibe titulo, autor, editora, genero, status, progresso de leitura e avaliacao
+* booksApi.ts centraliza getAllBooks() e chama GET /api/books com Accept: application/json
+* useBooks usa getAllBooks(), AbortController e estados de loading, refreshing, erro e sucesso
+* BookList renderiza hero, indicadores do acervo, estados de carregamento/erro/vazio e grid responsivo
+* BookCard exibe capa ou iniciais, titulo, autor, editora, genero, ano, status, progresso de leitura e avaliacao
 * Status mapeados: NAO_LIDO, LENDO, LIDO, ABANDONADO
 
 Direção de Design
 * Projeto web é o laboratório principal de design
 * Objetivo visual: bonito, moderno, responsivo, clean, minimalista e elegante
+* Direção visual em teste: tons claros com base branca/azulada e acentos pastel em azul, verde, amarelo e vermelho/rosa
+* Ajuste visual decidido: sem degradê no topo e sem degradê no fundo geral; topo em azul pastel um pouco mais escuro e corpo em azul pastel claro uniforme
+* Hero principal deve manter "Laboratório de design" e o titulo "Sua biblioteca", mas sem o complemento "com calma e presença." e sem o texto descritivo abaixo
+* Barra de progresso deve usar degradê com ordem semântica: vermelho pastel → amarelo pastel → azul pastel → verde pastel
+* Mantido da primeira direção: tipografia serifada para títulos, cards arredondados, sombras suaves e layout responsivo
 * Evitar visual genérico de template
 * Buscar uma identidade consistente antes de portar ideias para o iOS
 * Futuras decisões de tipografia, cores, espaçamento, cards, animações e layout devem ser registradas aqui
@@ -104,7 +121,7 @@ Pendências Críticas
 Nenhuma pendência crítica no momento.
 
 Próximos Passos
-1. Definir a linguagem visual base do web
+1. Rodar o backend em localhost:8080 e o Vite em localhost:8081 para validar a integração real no navegador
 2. Evoluir a tela de lista de livros como vitrine visual do produto
 3. Criar tela de detalhe do livro no web antes de levar a ideia para o iOS
 4. Planejar componentes reutilizáveis para cards, badges, progresso e estados vazios

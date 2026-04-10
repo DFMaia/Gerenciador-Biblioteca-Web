@@ -1,44 +1,52 @@
-import { useEffect, useState } from 'react'
-import { Book } from '../types/Book'
+import { useEffect, useRef, useState } from 'react'
+import { getAllBooks } from '../api/booksApi'
+import type { Book } from '../types/Book'
 
 interface UseBooksResult {
   books: Book[]
-  loading: boolean
+  isLoading: boolean
+  isRefreshing: boolean
   error: string | null
   refresh: () => void
 }
 
 export function useBooks(): UseBooksResult {
   const [books, setBooks] = useState<Book[]>([])
-  const [loading, setLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [trigger, setTrigger] = useState(0)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const hasLoadedOnce = useRef(false)
 
   useEffect(() => {
-    let cancelled = false
+    const controller = new AbortController()
 
-    async function fetchBooks() {
-      setLoading(true)
+    async function loadBooks() {
+      setIsLoading(!hasLoadedOnce.current)
+      setIsRefreshing(hasLoadedOnce.current)
       setError(null)
 
       try {
-        const response = await fetch('http://localhost:8080/books')
-        if (!response.ok) throw new Error('Erro ao carregar livros.')
-        const data: Book[] = await response.json()
-        if (!cancelled) setBooks(data)
-      } catch {
-        if (!cancelled)
-          setError('Biblioteca não encontrada. Verifique se o servidor está rodando.')
+        const data = await getAllBooks(controller.signal)
+        setBooks(data)
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setError('Biblioteca não encontrada. Verifique se o servidor está rodando.')
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!controller.signal.aborted) {
+          hasLoadedOnce.current = true
+          setIsLoading(false)
+          setIsRefreshing(false)
+        }
       }
     }
 
-    fetchBooks()
-    return () => { cancelled = true }
-  }, [trigger])
+    loadBooks()
 
-  const refresh = () => setTrigger(t => t + 1)
+    return () => controller.abort()
+  }, [refreshKey])
 
-  return { books, loading, error, refresh }
+  const refresh = () => setRefreshKey(current => current + 1)
+
+  return { books, isLoading, isRefreshing, error, refresh }
 }
