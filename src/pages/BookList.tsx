@@ -1,129 +1,204 @@
+import { useEffect, useState } from 'react'
 import { BookCard } from '../components/BookCard'
+import { DetailSheet } from '../components/DetailSheet'
+import { NewBookModal } from '../components/NewBookModal'
 import { useBooks } from '../hooks/useBooks'
+import type { Book } from '../types/Book'
+
+type Theme = 'kinari' | 'sumi' | 'sepia'
 
 const numberFormatter = new Intl.NumberFormat('pt-BR')
 
-export function BookList() {
-  const { books, isLoading, isRefreshing, error, refresh } = useBooks()
+// ── Theme Switcher ──────────────────────────────────────────
+function ThemeSwitcher({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme) => void }) {
+  const themes: { id: Theme; label: string }[] = [
+    { id: 'kinari', label: 'Kinari' },
+    { id: 'sumi',   label: 'Sumi'   },
+    { id: 'sepia',  label: 'Sépia'  },
+  ]
+  return (
+    <div className="wa-theme-switch">
+      <span className="wa-label">Tema</span>
+      {themes.map(t => (
+        <button
+          key={t.id}
+          onClick={() => setTheme(t.id)}
+          className={`wa-theme-chip ${theme === t.id ? 'is-active' : ''}`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  )
+}
 
-  const completedBooks = books.filter(book => book.status === 'LIDO').length
-  const readingBooks = books.filter(book => book.status === 'LENDO').length
-  const trackedPages = books.reduce((total, book) => total + (book.currentPage ?? 0), 0)
-  const totalPages = books.reduce((total, book) => total + (book.totalPages ?? 0), 0)
+// ── Hero ────────────────────────────────────────────────────
+function Hero({ books }: { books: Book[] }) {
+  const lendo        = books.filter(b => b.status === 'LENDO').length
+  const lidos        = books.filter(b => b.status === 'LIDO').length
+  const trackedPages = books.reduce((t, b) => t + (b.currentPage ?? 0), 0)
+  const totalPages   = books.reduce((t, b) => t + (b.totalPages  ?? 0), 0)
 
   return (
-    <div className="min-h-screen overflow-hidden bg-[#eef7ff] font-[var(--font-body)] text-[#172033]">
-      <header className="relative z-10 bg-[#cfe5ff] shadow-[0_18px_54px_rgba(83,122,178,0.12)]">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-6 sm:px-8 lg:px-10">
+    <section className="wa-hero">
+      <div className="wa-hero-head">
+        <p className="wa-eyebrow">Laboratório de design</p>
+      </div>
+
+      <h2 className="wa-hero-title">Sua biblioteca</h2>
+
+      <hr className="wa-rule" style={{ margin: '40px 0 0' }} />
+
+      <div className="wa-metrics">
+        <Metric label="Acervo"  value={numberFormatter.format(books.length)} sub="livros vindos do backend" />
+        <Metric label="Lendo"   value={numberFormatter.format(lendo)}        sub="em andamento"             />
+        <Metric label="Lidos"   value={numberFormatter.format(lidos)}        sub="concluídos"               />
+        <Metric label="Páginas" value={numberFormatter.format(trackedPages)} sub={`de ${numberFormatter.format(totalPages)} no total`} />
+      </div>
+    </section>
+  )
+}
+
+function Metric({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="wa-metric">
+      <div className="wa-label">{label}</div>
+      <div className="wa-num wa-metric-num">{value}</div>
+      <div className="wa-metric-sub">{sub}</div>
+    </div>
+  )
+}
+
+// ── BookList (página principal) ─────────────────────────────
+export function BookList() {
+  const { books, isLoading, isRefreshing, error, refresh } = useBooks()
+  const [selectedBook, setSelectedBook] = useState<Book | null>(null)
+  const [showNewBook,  setShowNewBook]  = useState(false)
+
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem('wabi-theme')
+    return (saved === 'kinari' || saved === 'sumi' || saved === 'sepia') ? saved : 'kinari'
+  })
+
+  // Aplica o tema no <html> e persiste
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('wabi-theme', theme)
+  }, [theme])
+
+  return (
+    <div className="wa-app">
+
+      {/* HEADER */}
+      <header className="wa-header">
+        <div className="wa-header-inner">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.36em] text-[#4f7fbd]">Biblioteca pessoal</p>
-            <h1 className="mt-2 font-[var(--font-display)] text-2xl tracking-[-0.04em] sm:text-3xl">
-              Gerenciador de Biblioteca
-            </h1>
+            <p className="wa-eyebrow">Biblioteca pessoal</p>
+            <h1 className="wa-header-title">Gerenciador de Biblioteca</h1>
           </div>
 
-          <button
-            onClick={refresh}
-            className="rounded-full border border-[#b5d4fb] bg-white/88 px-5 py-3 text-sm font-semibold text-[#2f5f9f] shadow-[0_14px_34px_rgba(83,122,178,0.18)] transition hover:-translate-y-0.5 hover:border-[#8dbdf5] hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isLoading || isRefreshing}
-          >
-            {isRefreshing ? 'Sincronizando...' : 'Atualizar'}
-          </button>
+          <div className="wa-header-right">
+            <ThemeSwitcher theme={theme} setTheme={setTheme} />
+
+            <button
+              className="wa-btn wa-btn-secondary"
+              onClick={refresh}
+              disabled={isLoading || isRefreshing}
+            >
+              {isRefreshing ? 'Sincronizando…' : 'Atualizar'}
+            </button>
+
+            <button
+              className="wa-btn wa-btn-primary"
+              onClick={() => setShowNewBook(true)}
+            >
+              + Novo livro
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto max-w-7xl px-5 py-10 sm:px-8 lg:px-10">
-        <section className="grid gap-8 rounded-[2.5rem] border border-white/90 bg-white/76 p-6 shadow-[0_30px_110px_rgba(102,132,178,0.16)] backdrop-blur-xl md:grid-cols-[1.15fr_0.85fr] md:p-10">
-          <div className="flex flex-col justify-center">
-            <p className="text-sm font-bold uppercase tracking-[0.32em] text-[#6d8fc8]">
-              Laboratório de design
-            </p>
-            <h2 className="mt-5 max-w-3xl font-[var(--font-display)] text-5xl leading-[0.95] tracking-[-0.07em] text-[#172033] sm:text-6xl lg:text-7xl">
-              Sua biblioteca
-            </h2>
-          </div>
+      {/* MAIN */}
+      <main className="wa-main">
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-[1.75rem] bg-[#e8f2ff] p-5 text-[#173c72] shadow-[0_24px_50px_rgba(112,149,203,0.18)] ring-1 ring-[#cfe0ff]">
-              <p className="text-xs font-bold uppercase tracking-[0.26em] text-[#5d87c4]">Acervo</p>
-              <p className="mt-4 font-[var(--font-display)] text-5xl tracking-[-0.06em]">
-                {numberFormatter.format(books.length)}
-              </p>
-              <p className="mt-2 text-sm text-[#5274a5]">livros vindos do backend</p>
-            </div>
-            <div className="rounded-[1.75rem] bg-[#eaf8f0] p-5 text-[#174c36] ring-1 ring-[#ccefdc]">
-              <p className="text-xs font-bold uppercase tracking-[0.26em] text-[#62a985]">Lendo</p>
-              <p className="mt-4 font-[var(--font-display)] text-5xl tracking-[-0.06em]">
-                {numberFormatter.format(readingBooks)}
-              </p>
-              <p className="mt-2 text-sm text-[#5a836c]">em andamento</p>
-            </div>
-            <div className="rounded-[1.75rem] bg-[#fff7d6] p-5 text-[#6f5515] ring-1 ring-[#f7e8a8]">
-              <p className="text-xs font-bold uppercase tracking-[0.26em] text-[#b69a3d]">Lidos</p>
-              <p className="mt-4 font-[var(--font-display)] text-5xl tracking-[-0.06em]">
-                {numberFormatter.format(completedBooks)}
-              </p>
-              <p className="mt-2 text-sm text-[#8e7a38]">concluídos</p>
-            </div>
-            <div className="rounded-[1.75rem] bg-[#ffecef] p-5 text-[#7b2e3b] ring-1 ring-[#ffd3db]">
-              <p className="text-xs font-bold uppercase tracking-[0.26em] text-[#c56f80]">Páginas</p>
-              <p className="mt-4 font-[var(--font-display)] text-4xl tracking-[-0.06em]">
-                {numberFormatter.format(trackedPages)}
-              </p>
-              <p className="mt-2 text-sm text-[#9d6470]">de {numberFormatter.format(totalPages)}</p>
-            </div>
-          </div>
-        </section>
+        {/* Hero com métricas */}
+        <Hero books={books} />
 
-        <section className="mt-10">
-          <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        {/* Coleção */}
+        <section className="wa-collection">
+          <div className="wa-collection-head">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.3em] text-[#6d8fc8]">Livros</p>
-              <h3 className="mt-2 font-[var(--font-display)] text-4xl tracking-[-0.06em]">Coleção Atual de Livros</h3>
+              <p className="wa-label">Livros</p>
+              <h3 className="wa-collection-title">Coleção atual</h3>
             </div>
             {!isLoading && !error && (
-              <p className="text-sm font-medium text-slate-500">
-                {numberFormatter.format(books.length)} {books.length === 1 ? 'livro sincronizado' : 'livros sincronizados'}
+              <p className="wa-meta">
+                {numberFormatter.format(books.length)}{' '}
+                {books.length === 1 ? 'livro sincronizado' : 'livros sincronizados'}
               </p>
             )}
           </div>
 
+          <hr className="wa-rule" style={{ margin: '0 0 32px' }} />
+
+          {/* Estado: carregando */}
           {isLoading && (
-            <div className="rounded-[2rem] border border-white/90 bg-white/80 px-6 py-16 text-center shadow-[0_18px_60px_rgba(102,132,178,0.12)]">
-              <p className="text-sm font-semibold uppercase tracking-[0.28em] text-[#6d8fc8]">Carregando livros...</p>
-              <p className="mt-3 text-slate-500">Buscando dados em GET /books.</p>
+            <div className="wa-state">
+              <p className="wa-label">Carregando livros…</p>
+              <p className="wa-state-sub">Buscando dados em GET /books.</p>
             </div>
           )}
 
+          {/* Estado: erro */}
           {!isLoading && error && (
-            <div className="rounded-[2rem] border border-[#ffd3db] bg-[#fff4f6]/90 px-6 py-14 text-center shadow-[0_18px_60px_rgba(197,111,128,0.12)]">
-              <p className="font-[var(--font-display)] text-3xl tracking-[-0.04em] text-[#7b2e3b]">Não consegui carregar a biblioteca.</p>
-              <p className="mx-auto mt-3 max-w-xl text-slate-600">{error}</p>
+            <div className="wa-state wa-state-error">
+              <h3 className="wa-state-title">Não consegui carregar a biblioteca.</h3>
+              <p className="wa-state-sub">{error}</p>
               <button
+                className="wa-btn wa-btn-seal"
                 onClick={refresh}
-                className="mt-6 rounded-full bg-[#f4a8b6] px-5 py-3 text-sm font-semibold text-[#5b1d29] transition hover:-translate-y-0.5 hover:bg-[#f19aaa]"
+                style={{ marginTop: 20 }}
               >
                 Tentar novamente
               </button>
             </div>
           )}
 
+          {/* Estado: vazio */}
           {!isLoading && !error && books.length === 0 && (
-            <div className="rounded-[2rem] border border-white/90 bg-white/80 px-6 py-16 text-center shadow-[0_18px_60px_rgba(102,132,178,0.12)]">
-              <p className="font-[var(--font-display)] text-3xl tracking-[-0.04em]">Nenhum livro encontrado.</p>
-              <p className="mt-3 text-slate-500">Quando o backend retornar livros, eles aparecem aqui.</p>
+            <div className="wa-state">
+              <h3 className="wa-state-title">Nenhum livro encontrado.</h3>
+              <p className="wa-state-sub">Quando o backend retornar livros, eles aparecem aqui.</p>
             </div>
           )}
 
+          {/* Grid de cards */}
           {!isLoading && !error && books.length > 0 && (
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+            <div className="wa-grid">
               {books.map(book => (
-                <BookCard key={book.id} book={book} />
+                <BookCard key={book.id} book={book} onClick={setSelectedBook} />
               ))}
             </div>
           )}
         </section>
+
+        {/* Footer */}
+        <footer className="wa-footer">
+          <hr className="wa-rule" style={{ margin: '0 0 20px' }} />
+          <div className="wa-footer-row">
+            <span className="wa-meta">蔵 · Gerenciador de Biblioteca</span>
+            <span className="wa-meta">GET /books · localhost:8080</span>
+          </div>
+        </footer>
       </main>
+
+      <DetailSheet book={selectedBook} onClose={() => setSelectedBook(null)} />
+
+      <NewBookModal
+        open={showNewBook}
+        onClose={() => setShowNewBook(false)}
+        onSaved={() => { setShowNewBook(false); refresh() }}
+      />
     </div>
   )
 }
