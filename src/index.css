@@ -609,6 +609,12 @@ button { font: inherit; cursor: pointer; }
   animation: wa-modal-in .22s var(--ease) both;
 }
 
+.wa-modal-success-shell {
+  width: min(420px, 100%);
+  max-height: none;
+  overflow: hidden;
+}
+
 @keyframes wa-modal-in {
   from { opacity: 0; transform: scale(0.96) translateY(10px); }
   to   { opacity: 1; transform: scale(1)    translateY(0);    }
@@ -630,6 +636,76 @@ button { font: inherit; cursor: pointer; }
 }
 
 .wa-modal-body { padding: 0 40px 40px; }
+
+.wa-modal-success {
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 40px;
+}
+
+.wa-success-mark {
+  width: 96px;
+  height: 96px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 28px;
+}
+
+.wa-success-icon {
+  width: 96px;
+  height: 96px;
+  overflow: visible;
+}
+
+.wa-success-ring,
+.wa-success-circle,
+.wa-success-check {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wa-success-ring {
+  stroke: color-mix(in srgb, var(--moss) 22%, var(--paper-edge));
+  stroke-width: 3.5;
+}
+
+.wa-success-circle {
+  stroke: var(--moss);
+  stroke-width: 3.5;
+  stroke-dasharray: 170;
+  stroke-dashoffset: 170;
+  animation: wa-success-circle-draw .75s var(--ease) forwards;
+}
+
+.wa-success-check {
+  stroke: var(--moss);
+  stroke-width: 4.5;
+  stroke-dasharray: 34;
+  stroke-dashoffset: 34;
+  animation: wa-success-check-draw .25s ease-out .75s forwards;
+}
+
+.wa-success-title {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 2.75rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin-top: 12px;
+}
+
+.wa-success-sub {
+  font-family: var(--font-meta);
+  font-size: 0.82rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-top: 14px;
+}
 
 /* ── Choice cards ─────────────────────────────────────────── */
 .wa-choice-grid {
@@ -771,9 +847,20 @@ button { font: inherit; cursor: pointer; }
   padding: 10px 16px;
 }
 
+@keyframes wa-success-circle-draw {
+  from { stroke-dashoffset: 170; }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes wa-success-check-draw {
+  from { stroke-dashoffset: 34; }
+  to   { stroke-dashoffset: 0; }
+}
+
 @media (max-width: 640px) {
   .wa-modal-head  { padding: 24px 20px 20px; }
   .wa-modal-body  { padding: 0 20px 28px; }
+  .wa-modal-success { min-height: 320px; padding: 40px 20px; }
   .wa-choice-grid { grid-template-columns: 1fr; }
   .wa-form-row, .wa-form-row-3 { grid-template-columns: 1fr; gap: 22px; }
 }

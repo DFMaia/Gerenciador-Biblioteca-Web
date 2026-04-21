@@ -10,7 +10,18 @@ export async function saveEdition(dto: EditionRequest): Promise<void> {
   })
 
   if (!response.ok) {
-    if (response.status === 409) throw new Error('Esta edição já está cadastrada.')
-    throw new Error('Não foi possível salvar o livro.')
+    let message = 'Não foi possível salvar o livro.'
+
+    try {
+      const data = await response.json() as { message?: string }
+      if (typeof data.message === 'string' && data.message.trim()) {
+        message = data.message
+      }
+    } catch {
+      // Mantém a mensagem padrão quando o backend não retorna JSON legível.
+    }
+
+    if (response.status === 409) throw new Error(message)
+    throw new Error(message)
   }
 }

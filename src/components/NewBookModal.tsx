@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useEffectEvent, useState } from 'react'
 import { saveEdition } from '../api/editionsApi'
 import type { EditionFormat, EditionRequest, EditionType } from '../types/Edition'
 
@@ -79,6 +79,8 @@ const EMPTY_FORM: FormState = {
   publishedYear: '', isbn: '', description: '',
 }
 
+const SUCCESS_ANIMATION_MS = 1500
+
 // ── Props ───────────────────────────────────────────────────
 interface NewBookModalProps {
   open:    boolean
@@ -92,11 +94,30 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
   const [form,    setForm]    = useState<FormState>(EMPTY_FORM)
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState<string | null>(null)
+  const [isSuccess, setIsSuccess] = useState(false)
+
+  function resetState() {
+    setMode(null)
+    setForm(EMPTY_FORM)
+    setError(null)
+    setLoading(false)
+    setIsSuccess(false)
+  }
+
+  function handleClose() {
+    if (loading || isSuccess) return
+    resetState()
+    onClose()
+  }
+
+  const handleEscape = useEffectEvent(() => {
+    handleClose()
+  })
 
   // Fecha com Escape e bloqueia scroll
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleClose() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleEscape() }
     document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
     return () => {
@@ -105,14 +126,18 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
     }
   }, [open])
 
-  if (!open) return null
+  useEffect(() => {
+    if (!isSuccess) return
 
-  function handleClose() {
-    setMode(null)
-    setForm(EMPTY_FORM)
-    setError(null)
-    onClose()
-  }
+    const timeoutId = window.setTimeout(() => {
+      resetState()
+      onSaved()
+    }, SUCCESS_ANIMATION_MS)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [isSuccess, onSaved])
+
+  if (!open) return null
 
   function set(field: keyof FormState) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -123,10 +148,6 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
   const canSubmit =
     form.title.trim() &&
     form.author.trim() &&
-    form.genre &&
-    form.editionType &&
-    form.format &&
-    form.editionNumber.trim() &&
     !loading
 
   async function handleSubmit(e: React.FormEvent) {
@@ -138,10 +159,10 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
     const dto: EditionRequest = {
       title:         form.title.trim(),
       author:        form.author.trim(),
-      genre:         form.genre,
-      editionType:   form.editionType as EditionType,
-      format:        form.format as EditionFormat,
-      editionNumber: Number(form.editionNumber),
+      genre:         form.genre || null,
+      editionType:   form.editionType || null,
+      format:        form.format || null,
+      editionNumber: form.editionNumber ? Number(form.editionNumber) : null,
       publisher:     form.publisher.trim()     || null,
       totalPages:    form.totalPages           ? Number(form.totalPages)    : null,
       language:      form.language.trim()      || null,
@@ -152,161 +173,182 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
 
     try {
       await saveEdition(dto)
-      onSaved()
-      handleClose()
+      setIsSuccess(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido.')
     } finally {
-      setLoading(false)
+      if (!isSuccess) setLoading(false)
     }
   }
 
   return (
     <div className="wa-modal-backdrop" onClick={handleClose}>
-      <div className="wa-modal" onClick={e => e.stopPropagation()}>
+      <div
+        className={`wa-modal ${isSuccess ? 'wa-modal-success-shell' : ''}`}
+        onClick={e => e.stopPropagation()}
+      >
 
-        {/* Cabeçalho */}
-        <div className="wa-modal-head">
-          <div>
-            <p className="wa-eyebrow">Catálogo</p>
-            <h2 className="wa-modal-title">Nova entrada</h2>
-          </div>
-          <button className="wa-sheet-close" onClick={handleClose}>Fechar ×</button>
-        </div>
-
-        <div className="wa-modal-body">
-          <hr className="wa-rule" style={{ marginBottom: 28 }} />
-
-          {/* Cards de escolha */}
-          <div className="wa-choice-grid">
-            <button
-              className={`wa-choice-card ${mode === 'manual' ? 'is-active' : ''}`}
-              onClick={() => setMode(mode === 'manual' ? null : 'manual')}
-            >
-              <div className="wa-choice-card-title">Adicionar dados manualmente</div>
-              <div className="wa-choice-card-sub">Preencha os dados da obra</div>
-            </button>
-
-            <button className="wa-choice-card is-disabled" disabled>
-              <div className="wa-choice-card-title">Pesquisar e Atualizar</div>
-              <div className="wa-choice-card-sub">Via Google Books · Em breve</div>
-            </button>
-          </div>
-
-          {/* Formulário — cresce quando modo manual está ativo */}
-          <div className={`wa-form-reveal ${mode === 'manual' ? 'is-open' : ''}`}>
-            <div className="wa-form-reveal-inner">
-              <form className="wa-form" onSubmit={handleSubmit}>
-
-                {/* Obra */}
-                <p className="wa-form-section-title">Obra</p>
-
-                <div className="wa-form-row">
-                  <div className="wa-form-group">
-                    <label className="wa-form-label">Título<span className="wa-form-req">*</span></label>
-                    <input className="wa-form-input" value={form.title} onChange={set('title')} placeholder="ex: O Senhor dos Anéis" />
-                  </div>
-                  <div className="wa-form-group">
-                    <label className="wa-form-label">Autor<span className="wa-form-req">*</span></label>
-                    <input className="wa-form-input" value={form.author} onChange={set('author')} placeholder="ex: J.R.R. Tolkien" />
-                  </div>
-                </div>
-
-                <div className="wa-form-group">
-                  <label className="wa-form-label">Gênero<span className="wa-form-req">*</span></label>
-                  <select className="wa-form-select" value={form.genre} onChange={set('genre')}>
-                    <option value="">Selecione um gênero</option>
-                    {GENRES.map(g => (
-                      <option key={g} value={g}>{label(g)}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Edição */}
-                <p className="wa-form-section-title" style={{ marginTop: 12 }}>Edição</p>
-
-                <div className="wa-form-row-3">
-                  <div className="wa-form-group">
-                    <label className="wa-form-label">Tipo<span className="wa-form-req">*</span></label>
-                    <select className="wa-form-select" value={form.editionType} onChange={set('editionType')}>
-                      <option value="">Selecione</option>
-                      <option value="FISICO">Físico</option>
-                      <option value="DIGITAL">Digital</option>
-                    </select>
-                  </div>
-                  <div className="wa-form-group">
-                    <label className="wa-form-label">Formato<span className="wa-form-req">*</span></label>
-                    <select className="wa-form-select" value={form.format} onChange={set('format')}>
-                      <option value="">Selecione</option>
-                      {EDITION_FORMATS.map(f => (
-                        <option key={f} value={f}>{label(f)}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="wa-form-group">
-                    <label className="wa-form-label">Nº da edição<span className="wa-form-req">*</span></label>
-                    <input className="wa-form-input" type="number" min={1} value={form.editionNumber} onChange={set('editionNumber')} placeholder="1" />
-                  </div>
-                </div>
-
-                {/* Detalhes */}
-                <p className="wa-form-section-title" style={{ marginTop: 12 }}>Detalhes</p>
-
-                <div className="wa-form-row">
-                  <div className="wa-form-group">
-                    <label className="wa-form-label">Editora</label>
-                    <input className="wa-form-input" value={form.publisher} onChange={set('publisher')} placeholder="ex: HarperCollins" />
-                  </div>
-                  <div className="wa-form-group">
-                    <label className="wa-form-label">Idioma</label>
-                    <input className="wa-form-input" value={form.language} onChange={set('language')} placeholder="ex: Português" />
-                  </div>
-                </div>
-
-                <div className="wa-form-row">
-                  <div className="wa-form-group">
-                    <label className="wa-form-label">Ano de publicação</label>
-                    <input className="wa-form-input" type="number" min={1000} max={2100} value={form.publishedYear} onChange={set('publishedYear')} placeholder="ex: 2001" />
-                  </div>
-                  <div className="wa-form-group">
-                    <label className="wa-form-label">Páginas</label>
-                    <input className="wa-form-input" type="number" min={1} value={form.totalPages} onChange={set('totalPages')} placeholder="ex: 576" />
-                  </div>
-                </div>
-
-                <div className="wa-form-group">
-                  <label className="wa-form-label">ISBN</label>
-                  <input className="wa-form-input" value={form.isbn} onChange={set('isbn')} placeholder="ex: 978-0-06-112008-4" />
-                </div>
-
-                <div className="wa-form-group">
-                  <label className="wa-form-label">Descrição</label>
-                  <textarea className="wa-form-textarea" value={form.description} onChange={set('description')} placeholder="Sinopse ou notas sobre o livro…" />
-                </div>
-
-                {/* Erro */}
-                {error && <div className="wa-form-error">{error}</div>}
-
-                {/* Ações */}
-                <div className="wa-form-actions">
-                  <button type="button" className="wa-btn wa-btn-secondary" onClick={handleClose}>
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="wa-btn wa-btn-primary"
-                    disabled={!canSubmit}
-                    style={{ opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? 'pointer' : 'not-allowed' }}
-                  >
-                    {loading ? 'Salvando…' : 'Adicionar à sua biblioteca'}
-                  </button>
-                </div>
-
-              </form>
+        {isSuccess ? (
+          <div className="wa-modal-success">
+            <div className="wa-success-mark" aria-hidden="true">
+              <svg className="wa-success-icon" viewBox="0 0 72 72" fill="none">
+                <circle className="wa-success-ring" cx="36" cy="36" r="27" />
+                <circle className="wa-success-circle" cx="36" cy="36" r="27" />
+                <path className="wa-success-check" d="M24 37.5L32.5 46L49 29.5" />
+              </svg>
             </div>
-          </div>
 
-        </div>
+            <p className="wa-eyebrow">Catálogo</p>
+            <h2 className="wa-success-title">Livro Adicionado</h2>
+            <p className="wa-success-sub">Voltando para a sua biblioteca…</p>
+          </div>
+        ) : (
+          <>
+
+            {/* Cabeçalho */}
+            <div className="wa-modal-head">
+              <div>
+                <p className="wa-eyebrow">Catálogo</p>
+                <h2 className="wa-modal-title">Nova entrada</h2>
+              </div>
+              <button className="wa-sheet-close" onClick={handleClose}>Fechar ×</button>
+            </div>
+
+            <div className="wa-modal-body">
+              <hr className="wa-rule" style={{ marginBottom: 28 }} />
+
+              {/* Cards de escolha */}
+              <div className="wa-choice-grid">
+                <button
+                  className={`wa-choice-card ${mode === 'manual' ? 'is-active' : ''}`}
+                  onClick={() => setMode(mode === 'manual' ? null : 'manual')}
+                >
+                  <div className="wa-choice-card-title">Adicionar dados manualmente</div>
+                  <div className="wa-choice-card-sub">Preencha os dados da obra</div>
+                </button>
+
+                <button className="wa-choice-card is-disabled" disabled>
+                  <div className="wa-choice-card-title">Pesquisar e Atualizar</div>
+                  <div className="wa-choice-card-sub">Via Google Books · Em breve</div>
+                </button>
+              </div>
+
+              {/* Formulário — cresce quando modo manual está ativo */}
+              <div className={`wa-form-reveal ${mode === 'manual' ? 'is-open' : ''}`}>
+                <div className="wa-form-reveal-inner">
+                  <form className="wa-form" onSubmit={handleSubmit}>
+
+                    {/* Obra */}
+                    <p className="wa-form-section-title">Obra</p>
+
+                    <div className="wa-form-row">
+                      <div className="wa-form-group">
+                        <label className="wa-form-label">Título<span className="wa-form-req">*</span></label>
+                        <input className="wa-form-input" value={form.title} onChange={set('title')} placeholder="ex: O Senhor dos Anéis" />
+                      </div>
+                      <div className="wa-form-group">
+                        <label className="wa-form-label">Autor<span className="wa-form-req">*</span></label>
+                        <input className="wa-form-input" value={form.author} onChange={set('author')} placeholder="ex: J.R.R. Tolkien" />
+                      </div>
+                    </div>
+
+                    <div className="wa-form-group">
+                      <label className="wa-form-label">Gênero</label>
+                      <select className="wa-form-select" value={form.genre} onChange={set('genre')}>
+                        <option value="">Selecione um gênero</option>
+                        {GENRES.map(g => (
+                          <option key={g} value={g}>{label(g)}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Edição */}
+                    <p className="wa-form-section-title" style={{ marginTop: 12 }}>Edição</p>
+
+                    <div className="wa-form-row-3">
+                      <div className="wa-form-group">
+                        <label className="wa-form-label">Tipo</label>
+                        <select className="wa-form-select" value={form.editionType} onChange={set('editionType')}>
+                          <option value="">Selecione</option>
+                          <option value="FISICO">Físico</option>
+                          <option value="DIGITAL">Digital</option>
+                        </select>
+                      </div>
+                      <div className="wa-form-group">
+                        <label className="wa-form-label">Formato</label>
+                        <select className="wa-form-select" value={form.format} onChange={set('format')}>
+                          <option value="">Selecione</option>
+                          {EDITION_FORMATS.map(f => (
+                            <option key={f} value={f}>{label(f)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="wa-form-group">
+                        <label className="wa-form-label">Nº da edição</label>
+                        <input className="wa-form-input" type="number" min={1} value={form.editionNumber} onChange={set('editionNumber')} placeholder="1" />
+                      </div>
+                    </div>
+
+                    {/* Detalhes */}
+                    <p className="wa-form-section-title" style={{ marginTop: 12 }}>Detalhes</p>
+
+                    <div className="wa-form-row">
+                      <div className="wa-form-group">
+                        <label className="wa-form-label">Editora</label>
+                        <input className="wa-form-input" value={form.publisher} onChange={set('publisher')} placeholder="ex: HarperCollins" />
+                      </div>
+                      <div className="wa-form-group">
+                        <label className="wa-form-label">Idioma</label>
+                        <input className="wa-form-input" value={form.language} onChange={set('language')} placeholder="ex: Português" />
+                      </div>
+                    </div>
+
+                    <div className="wa-form-row">
+                      <div className="wa-form-group">
+                        <label className="wa-form-label">Ano de publicação</label>
+                        <input className="wa-form-input" type="number" min={1000} max={2100} value={form.publishedYear} onChange={set('publishedYear')} placeholder="ex: 2001" />
+                      </div>
+                      <div className="wa-form-group">
+                        <label className="wa-form-label">Páginas</label>
+                        <input className="wa-form-input" type="number" min={1} value={form.totalPages} onChange={set('totalPages')} placeholder="ex: 576" />
+                      </div>
+                    </div>
+
+                    <div className="wa-form-group">
+                      <label className="wa-form-label">ISBN</label>
+                      <input className="wa-form-input" value={form.isbn} onChange={set('isbn')} placeholder="ex: 978-0-06-112008-4" />
+                    </div>
+
+                    <div className="wa-form-group">
+                      <label className="wa-form-label">Descrição</label>
+                      <textarea className="wa-form-textarea" value={form.description} onChange={set('description')} placeholder="Sinopse ou notas sobre o livro…" />
+                    </div>
+
+                    {/* Erro */}
+                    {error && <div className="wa-form-error">{error}</div>}
+
+                    {/* Ações */}
+                    <div className="wa-form-actions">
+                      <button type="button" className="wa-btn wa-btn-secondary" onClick={handleClose}>
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        className="wa-btn wa-btn-primary"
+                        disabled={!canSubmit}
+                        style={{ opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? 'pointer' : 'not-allowed' }}
+                      >
+                        {loading ? 'Salvando…' : 'Adicionar à sua biblioteca'}
+                      </button>
+                    </div>
+
+                  </form>
+                </div>
+              </div>
+
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

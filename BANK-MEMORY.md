@@ -39,9 +39,20 @@ A IA atua como TechLead, professor sênior e colega de confiança — nunca exec
 * Pede confirmação antes de agir
 * Faz perguntas para verificar compreensão
 * Evita resultado genérico — a direção visual é intencional
+* Diego NÃO está programando o frontend web; a IA é a colega de trabalho responsável
+  pela implementação e evolução do front
+* Diego atua como diretor de produto e direção visual: aprova, corrige, comenta e orienta;
+  a IA executa o frontend com responsabilidade técnica e estética
+* A IA não deve tratar o web como tarefa "para Diego fazer depois"; neste projeto, o front
+  é responsabilidade direta da IA
 
 CÓDIGO: somente completo quando Diego pedir explicitamente.
 ALTERAÇÕES: nunca sem explicar e pedir confirmação.
+AMBIGUIDADES: nunca assumir; se houver mais de uma interpretação, perguntar antes de agir.
+OPINIÃO/IDEIA: se Diego perguntar "o que você acha?" ou estiver só explorando uma ideia,
+primeiro responder com opinião sincera e só implementar depois de confirmação explícita.
+CONFLITO DE MEMÓRIA: se uma instrução nova de Diego contradisser algo já escrito no
+BANK-MEMORY, a IA deve perguntar qual versão deve persistir.
 ERROS: assumir com clareza, sem auto-flagelação.
 CRISE: bem-estar primeiro, código depois.
 MEMÓRIA: atualizar a cada resposta relevante, sem medo do tamanho.
@@ -68,6 +79,9 @@ Frontend web do aplicativo pessoal de gerenciamento de biblioteca.
 É o LABORATÓRIO DE DESIGN principal do ecossistema — valida a linguagem visual
 antes de levá-la ao iOS. O web experimenta livremente; o iOS herda a essência
 quando madura, adaptada para padrões nativos Apple.
+Diego não é o implementador do frontend web. Neste projeto, a IA/Codex é a colega
+de trabalho responsável por desenhar, escrever e manter o código do front, enquanto
+Diego conduz preferências, direção e validação.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STACK E VERSÕES EXATAS
@@ -214,6 +228,9 @@ States: .wa-state .wa-state-title .wa-state-sub .wa-state-error
 Sheet: .wa-sheet-backdrop .wa-sheet .wa-sheet-head .wa-sheet-close .wa-sheet-title
        .wa-sheet-author .wa-sheet-dl .wa-sheet-desc
 Modal (NOVO): .wa-modal-backdrop .wa-modal .wa-modal-head .wa-modal-title .wa-modal-body
+Success state (NOVO s4): .wa-modal-success-shell .wa-modal-success .wa-success-mark
+      .wa-success-icon .wa-success-ring .wa-success-circle .wa-success-check
+      .wa-success-title .wa-success-sub
 Choice cards (NOVO): .wa-choice-grid .wa-choice-card (.is-active .is-disabled)
               .wa-choice-card-title .wa-choice-card-sub
 Form reveal (NOVO): .wa-form-reveal (.is-open) .wa-form-reveal-inner
@@ -578,3 +595,50 @@ HISTÓRICO DE SESSÕES
   - src/pages/BookList.tsx: showNewBook state + botão + modal renderizado
 * NÃO testado ainda — Diego encerrou a sessão por limite de uso do Claude
 * Próxima sessão: testar o fluxo completo e depois implementar "Pesquisar e Atualizar"
+
+21/04/2026 — Ajuste de validação do cadastro manual (sessão 3)
+* Diego reportou que o cadastro manual não estava deixando salvar e levantou a hipótese
+  de que o ISBN estivesse obrigatório
+* Checagem cética feita no código:
+  - ISBN NÃO está obrigatório no frontend
+  - ISBN NÃO está obrigatório no backend
+  - O desalinhamento real era outro: o frontend exigia gênero, tipo, formato e número
+    da edição, mas o backend atual não obriga esses campos
+* Ajustes implementados no frontend:
+  - src/components/NewBookModal.tsx: agora só título e autor bloqueiam envio
+  - gênero, tipo, formato e nº da edição deixaram de ter asterisco visual de obrigatório
+  - campos opcionais vazios agora são enviados como null, não como string vazia
+  - fechamento por Escape no modal foi ajustado com useEffectEvent para manter o lint limpo
+  - src/types/Edition.ts alinhado ao contrato atual do backend (campos opcionais/nullables)
+  - src/api/editionsApi.ts melhorado para reaproveitar a mensagem do backend quando houver erro
+* REGRA ATUAL DO CONTRATO: no estado atual do backend, os únicos campos realmente
+  obrigatórios para persistência são title e author
+
+21/04/2026 — Confirmação visual de sucesso após salvar (sessão 4)
+* Diego pediu um feedback pós-salvamento mais claro e elegante: uma nova janela com
+  "Livro Adicionado", animação verde de círculo sendo desenhado e, em seguida, um check
+  surgindo; depois de meio segundo, o fluxo fecha sozinho e volta para a coleção
+* Implementação feita dentro do próprio NewBookModal:
+  - após POST /api/editions com sucesso, o formulário some e entra um estado de sucesso
+  - o modal troca para uma versão menor e centralizada, dedicada à confirmação
+  - círculo verde desenha primeiro
+  - check é desenhado logo depois que o círculo termina
+  - o modal fecha sozinho e chama onSaved() ao fim de 1.5s
+* Timings do fluxo:
+  - círculo: 0.75s
+  - check: 0.25s (começa após o círculo)
+  - permanência final em repouso: 0.5s
+  - total do feedback: 1.5s
+* Classes novas em src/index.css:
+  - .wa-modal-success-shell
+  - .wa-modal-success
+  - .wa-success-mark
+  - .wa-success-icon
+  - .wa-success-ring
+  - .wa-success-circle
+  - .wa-success-check
+  - .wa-success-title
+  - .wa-success-sub
+* Validação:
+  - npm run lint OK
+  - npm run build OK

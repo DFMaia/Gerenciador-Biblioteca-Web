@@ -4,10 +4,10 @@ export type EditionFormat = 'ANIVERSARIO' | 'BILINGUE' | 'BOLSO' | 'BROCHURA' | 
 export interface EditionRequest {
   title:         string
   author:        string
-  genre:         string
-  editionType:   EditionType
-  format:        EditionFormat
-  editionNumber: number
+  genre?:        string | null
+  editionType?:  EditionType | null
+  format?:       EditionFormat | null
+  editionNumber?: number | null
   totalPages?:   number | null
   publisher?:    string | null
   language?:     string | null
