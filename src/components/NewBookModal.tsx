@@ -1,6 +1,8 @@
 import { useEffect, useEffectEvent, useState } from 'react'
 import { saveEdition } from '../api/editionsApi'
+import { searchGoogleBooks } from '../api/googleBooksApi'
 import type { EditionFormat, EditionRequest, EditionType } from '../types/Edition'
+import type { GoogleBooksResult } from '../types/GoogleBooks'
 
 // ── Dados dos enums ─────────────────────────────────────────
 const GENRES = [
@@ -55,8 +57,41 @@ function label(value: string) {
   return value.replace(/_/g, ' ').toLowerCase().replace(/^./, c => c.toUpperCase())
 }
 
+type CoverPreviewStatus = 'loading' | 'loaded' | 'error'
+
+function CoverUrlPreview({ url }: { url: string }) {
+  const trimmedUrl = url.trim()
+  if (!trimmedUrl) return null
+
+  return <CoverPreviewImage key={trimmedUrl} url={trimmedUrl} />
+}
+
+function CoverPreviewImage({ url }: { url: string }) {
+  const [status, setStatus] = useState<CoverPreviewStatus>('loading')
+
+  return (
+    <div className={`wa-form-cover-preview-shell is-${status}`} aria-live="polite">
+      <div className="wa-form-cover-preview-stage">
+        <img
+          className="wa-form-cover-preview"
+          src={url}
+          alt="Pré-visualização da capa"
+          onLoad={() => setStatus('loaded')}
+          onError={() => setStatus('error')}
+        />
+        {status === 'loading' && (
+          <p className="wa-form-cover-preview-state">Carregando capa...</p>
+        )}
+        {status === 'error' && (
+          <p className="wa-form-cover-preview-state is-error">Não consegui carregar essa imagem.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Tipos internos ──────────────────────────────────────────
-type Mode = 'manual' | null
+type Mode = 'manual' | 'search' | null
 
 interface FormState {
   title:         string
@@ -70,13 +105,20 @@ interface FormState {
   language:      string
   publishedYear: string
   isbn:          string
+  coverUrl:      string
   description:   string
 }
 
 const EMPTY_FORM: FormState = {
   title: '', author: '', genre: '', editionType: '', format: '',
   editionNumber: '', publisher: '', totalPages: '', language: '',
-  publishedYear: '', isbn: '', description: '',
+  publishedYear: '', isbn: '', coverUrl: '', description: '',
+}
+
+interface SearchFormState {
+  title:     string
+  author:    string
+  publisher: string
 }
 
 const SUCCESS_ANIMATION_MS = 1500
@@ -90,11 +132,18 @@ interface NewBookModalProps {
 
 // ── Componente ──────────────────────────────────────────────
 export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
-  const [mode,    setMode]    = useState<Mode>(null)
-  const [form,    setForm]    = useState<FormState>(EMPTY_FORM)
-  const [loading, setLoading] = useState(false)
-  const [error,   setError]   = useState<string | null>(null)
+  const [mode,      setMode]      = useState<Mode>(null)
+  const [form,      setForm]      = useState<FormState>(EMPTY_FORM)
+  const [loading,   setLoading]   = useState(false)
+  const [error,     setError]     = useState<string | null>(null)
   const [isSuccess, setIsSuccess] = useState(false)
+
+  // Estado da busca
+  const [searchForm,     setSearchForm]     = useState<SearchFormState>({ title: '', author: '', publisher: '' })
+  const [searchResults,  setSearchResults]  = useState<GoogleBooksResult[]>([])
+  const [searchLoading,  setSearchLoading]  = useState(false)
+  const [searchError,    setSearchError]    = useState<string | null>(null)
+  const [selectedResult, setSelectedResult] = useState<GoogleBooksResult | null>(null)
 
   function resetState() {
     setMode(null)
@@ -102,6 +151,11 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
     setError(null)
     setLoading(false)
     setIsSuccess(false)
+    setSearchForm({ title: '', author: '', publisher: '' })
+    setSearchResults([])
+    setSearchLoading(false)
+    setSearchError(null)
+    setSelectedResult(null)
   }
 
   function handleClose() {
@@ -110,11 +164,17 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
     onClose()
   }
 
-  const handleEscape = useEffectEvent(() => {
-    handleClose()
-  })
+  function selectMode(next: Mode) {
+    setMode(prev => (prev === next ? null : next))
+    setForm(EMPTY_FORM)
+    setError(null)
+    setSearchResults([])
+    setSelectedResult(null)
+    setSearchError(null)
+  }
 
-  // Fecha com Escape e bloqueia scroll
+  const handleEscape = useEffectEvent(() => { handleClose() })
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleEscape() }
@@ -128,28 +188,85 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
 
   useEffect(() => {
     if (!isSuccess) return
-
-    const timeoutId = window.setTimeout(() => {
-      resetState()
-      onSaved()
-    }, SUCCESS_ANIMATION_MS)
-
-    return () => window.clearTimeout(timeoutId)
+    const id = window.setTimeout(() => { resetState(); onSaved() }, SUCCESS_ANIMATION_MS)
+    return () => window.clearTimeout(id)
   }, [isSuccess, onSaved])
 
   if (!open) return null
 
+  // ── Helpers de campo ────────────────────────────────────
   function set(field: keyof FormState) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
       setForm(prev => ({ ...prev, [field]: e.target.value }))
     }
   }
 
+  function setSearch(field: keyof SearchFormState) {
+    return (e: React.ChangeEvent<HTMLInputElement>) => {
+      setSearchForm(prev => ({ ...prev, [field]: e.target.value }))
+    }
+  }
+
+  // ── Validação ───────────────────────────────────────────
   const canSubmit =
-    form.title.trim() &&
-    form.author.trim() &&
+    form.title.trim()     !== '' &&
+    form.author.trim()    !== '' &&
+    form.publisher.trim() !== '' &&
     !loading
 
+  const canSearch =
+    searchForm.title.trim()  !== '' &&
+    searchForm.author.trim() !== '' &&
+    !searchLoading
+
+  // ── Busca Google Books ──────────────────────────────────
+  async function handleSearch(e: React.FormEvent) {
+    e.preventDefault()
+    if (!canSearch) return
+    setSearchError(null)
+    setSearchResults([])
+    setSelectedResult(null)
+    setForm(EMPTY_FORM)
+    setSearchLoading(true)
+    try {
+      const results = await searchGoogleBooks(
+        searchForm.title.trim(),
+        searchForm.author.trim(),
+        searchForm.publisher.trim() || null,
+      )
+      if (results.length === 0) {
+        setSearchError('Nenhum resultado encontrado. Tente com outras informações.')
+      } else {
+        setSearchResults(results)
+      }
+    } catch {
+      setSearchError('Não foi possível buscar no Google Books.')
+    } finally {
+      setSearchLoading(false)
+    }
+  }
+
+  function handleSelectResult(result: GoogleBooksResult) {
+    setSelectedResult(result)
+    setError(null)
+    setForm({
+      title:         result.title         ?? '',
+      author:        result.author        ?? '',
+      genre:         '',
+      editionType:   '',
+      format:        '',
+      editionNumber: '',
+      publisher:     result.publisher     ?? '',
+      totalPages:    result.totalPages    != null ? String(result.totalPages)    : '',
+      language:      result.language      ?? '',
+      publishedYear: result.publishedYear != null ? String(result.publishedYear) : '',
+      isbn:          result.isbn          ?? '',
+      coverUrl:      result.coverUrl      ?? '',
+      description:   result.description   ?? '',
+    })
+  }
+
+  // ── Submissão ───────────────────────────────────────────
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!canSubmit) return
@@ -159,15 +276,16 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
     const dto: EditionRequest = {
       title:         form.title.trim(),
       author:        form.author.trim(),
-      genre:         form.genre || null,
-      editionType:   form.editionType || null,
-      format:        form.format || null,
+      genre:         form.genre         || null,
+      editionType:   form.editionType   || null,
+      format:        form.format        || null,
       editionNumber: form.editionNumber ? Number(form.editionNumber) : null,
       publisher:     form.publisher.trim()     || null,
       totalPages:    form.totalPages           ? Number(form.totalPages)    : null,
       language:      form.language.trim()      || null,
       publishedYear: form.publishedYear        ? Number(form.publishedYear) : null,
       isbn:          form.isbn.trim()          || null,
+      coverUrl:      form.coverUrl.trim()      || null,
       description:   form.description.trim()   || null,
     }
 
@@ -181,6 +299,10 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
     }
   }
 
+  // ── O formulário de edição aparece no manual ou após seleção na busca ──
+  const showEditionForm = mode === 'manual' || (mode === 'search' && selectedResult !== null)
+
+  // ── JSX ─────────────────────────────────────────────────
   return (
     <div className="wa-modal-backdrop" onClick={handleClose}>
       <div
@@ -192,19 +314,18 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
           <div className="wa-modal-success">
             <div className="wa-success-mark" aria-hidden="true">
               <svg className="wa-success-icon" viewBox="0 0 72 72" fill="none">
-                <circle className="wa-success-ring" cx="36" cy="36" r="27" />
+                <circle className="wa-success-ring"   cx="36" cy="36" r="27" />
                 <circle className="wa-success-circle" cx="36" cy="36" r="27" />
-                <path className="wa-success-check" d="M24 37.5L32.5 46L49 29.5" />
+                <path   className="wa-success-check"  d="M24 37.5L32.5 46L49 29.5" />
               </svg>
             </div>
-
             <p className="wa-eyebrow">Catálogo</p>
             <h2 className="wa-success-title">Livro Adicionado</h2>
             <p className="wa-success-sub">Voltando para a sua biblioteca…</p>
           </div>
+
         ) : (
           <>
-
             {/* Cabeçalho */}
             <div className="wa-modal-head">
               <div>
@@ -221,20 +342,91 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
               <div className="wa-choice-grid">
                 <button
                   className={`wa-choice-card ${mode === 'manual' ? 'is-active' : ''}`}
-                  onClick={() => setMode(mode === 'manual' ? null : 'manual')}
+                  onClick={() => selectMode('manual')}
                 >
                   <div className="wa-choice-card-title">Adicionar dados manualmente</div>
                   <div className="wa-choice-card-sub">Preencha os dados da obra</div>
                 </button>
 
-                <button className="wa-choice-card is-disabled" disabled>
+                <button
+                  className={`wa-choice-card ${mode === 'search' ? 'is-active' : ''}`}
+                  onClick={() => selectMode('search')}
+                >
                   <div className="wa-choice-card-title">Pesquisar e Atualizar</div>
-                  <div className="wa-choice-card-sub">Via Google Books · Em breve</div>
+                  <div className="wa-choice-card-sub">Via Google Books</div>
                 </button>
               </div>
 
-              {/* Formulário — cresce quando modo manual está ativo */}
-              <div className={`wa-form-reveal ${mode === 'manual' ? 'is-open' : ''}`}>
+              {/* ── Seção de busca (modo search) ── */}
+              {mode === 'search' && (
+                <div className="wa-search-section">
+                  <form className="wa-search-form" onSubmit={handleSearch}>
+                    <div className="wa-form-row">
+                      <div className="wa-form-group">
+                        <label className="wa-form-label">Título<span className="wa-form-req">*</span></label>
+                        <input className="wa-form-input" value={searchForm.title} onChange={setSearch('title')} placeholder="ex: Os três mosqueteiros" />
+                      </div>
+                      <div className="wa-form-group">
+                        <label className="wa-form-label">Autor<span className="wa-form-req">*</span></label>
+                        <input className="wa-form-input" value={searchForm.author} onChange={setSearch('author')} placeholder="ex: Alexandre Dumas" />
+                      </div>
+                    </div>
+                    <div className="wa-form-group">
+                      <label className="wa-form-label">Editora</label>
+                      <input className="wa-form-input" value={searchForm.publisher} onChange={setSearch('publisher')} placeholder="ex: Companhia das Letras (opcional)" />
+                    </div>
+                    <div className="wa-search-actions">
+                      <button
+                        type="submit"
+                        className="wa-btn wa-btn-primary"
+                        disabled={!canSearch}
+                        style={{ opacity: canSearch ? 1 : 0.5, cursor: canSearch ? 'pointer' : 'not-allowed' }}
+                      >
+                        {searchLoading ? 'Buscando…' : 'Buscar'}
+                      </button>
+                    </div>
+                  </form>
+
+                  {searchError && (
+                    <div className="wa-form-error" style={{ marginTop: 16 }}>{searchError}</div>
+                  )}
+
+                  {searchResults.length > 0 && (
+                    <div className="wa-search-results">
+                      {searchResults.map((result, i) => (
+                        <button
+                          key={i}
+                          className={`wa-search-result ${selectedResult === result ? 'is-selected' : ''}`}
+                          onClick={() => handleSelectResult(result)}
+                        >
+                          {result.coverUrl ? (
+                            <img
+                              className="wa-search-result-cover"
+                              src={result.coverUrl}
+                              alt={result.title ?? ''}
+                              onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                            />
+                          ) : (
+                            <div className="wa-search-result-cover-init">
+                              {(result.title ?? '?')[0].toUpperCase()}
+                            </div>
+                          )}
+                          <div className="wa-search-result-body">
+                            <div className="wa-search-result-title">{result.title ?? '(sem título)'}</div>
+                            <div className="wa-search-result-author">{result.author ?? '(autor desconhecido)'}</div>
+                            <div className="wa-search-result-meta">
+                              {[result.publisher, result.publishedYear].filter(Boolean).join(' · ')}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Formulário de edição (manual ou pós-seleção) ── */}
+              <div className={`wa-form-reveal ${showEditionForm ? 'is-open' : ''}`}>
                 <div className="wa-form-reveal-inner">
                   <form className="wa-form" onSubmit={handleSubmit}>
 
@@ -294,7 +486,7 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
 
                     <div className="wa-form-row">
                       <div className="wa-form-group">
-                        <label className="wa-form-label">Editora</label>
+                        <label className="wa-form-label">Editora<span className="wa-form-req">*</span></label>
                         <input className="wa-form-input" value={form.publisher} onChange={set('publisher')} placeholder="ex: HarperCollins" />
                       </div>
                       <div className="wa-form-group">
@@ -320,14 +512,18 @@ export function NewBookModal({ open, onClose, onSaved }: NewBookModalProps) {
                     </div>
 
                     <div className="wa-form-group">
+                      <label className="wa-form-label">URL da capa</label>
+                      <input className="wa-form-input" value={form.coverUrl} onChange={set('coverUrl')} placeholder="https://…" />
+                      <CoverUrlPreview url={form.coverUrl} />
+                    </div>
+
+                    <div className="wa-form-group">
                       <label className="wa-form-label">Descrição</label>
                       <textarea className="wa-form-textarea" value={form.description} onChange={set('description')} placeholder="Sinopse ou notas sobre o livro…" />
                     </div>
 
-                    {/* Erro */}
                     {error && <div className="wa-form-error">{error}</div>}
 
-                    {/* Ações */}
                     <div className="wa-form-actions">
                       <button type="button" className="wa-btn wa-btn-secondary" onClick={handleClose}>
                         Cancelar

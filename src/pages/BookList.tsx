@@ -33,7 +33,7 @@ function ThemeSwitcher({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme)
 }
 
 // ── Hero ────────────────────────────────────────────────────
-function Hero({ books }: { books: Book[] }) {
+function Hero({ books, totalElements }: { books: Book[]; totalElements: number }) {
   const lendo        = books.filter(b => b.status === 'LENDO').length
   const lidos        = books.filter(b => b.status === 'LIDO').length
   const trackedPages = books.reduce((t, b) => t + (b.currentPage ?? 0), 0)
@@ -50,10 +50,10 @@ function Hero({ books }: { books: Book[] }) {
       <hr className="wa-rule" style={{ margin: '40px 0 0' }} />
 
       <div className="wa-metrics">
-        <Metric label="Acervo"  value={numberFormatter.format(books.length)} sub="livros vindos do backend" />
-        <Metric label="Lendo"   value={numberFormatter.format(lendo)}        sub="em andamento"             />
-        <Metric label="Lidos"   value={numberFormatter.format(lidos)}        sub="concluídos"               />
-        <Metric label="Páginas" value={numberFormatter.format(trackedPages)} sub={`de ${numberFormatter.format(totalPages)} no total`} />
+        <Metric label="Acervo"  value={numberFormatter.format(totalElements)} sub="livros no total"             />
+        <Metric label="Lendo"   value={numberFormatter.format(lendo)}         sub="em andamento"                />
+        <Metric label="Lidos"   value={numberFormatter.format(lidos)}         sub="concluídos"                  />
+        <Metric label="Páginas" value={numberFormatter.format(trackedPages)}  sub={`de ${numberFormatter.format(totalPages)} na página`} />
       </div>
     </section>
   )
@@ -69,9 +69,123 @@ function Metric({ label, value, sub }: { label: string; value: string; sub: stri
   )
 }
 
+// ── Pagination ──────────────────────────────────────────────
+const PAGE_SIZE_OPTIONS = [
+  { value: 20,  label: '20'   },
+  { value: 50,  label: '50'   },
+  { value: 100, label: '100'  },
+  { value: 0,   label: 'Tudo' },
+]
+
+interface PaginationProps {
+  currentPage: number
+  totalPages: number
+  pageSize: number
+  totalElements: number
+  isAllMode: boolean
+  onGoToPage: (page: number) => void
+  onSetPageSize: (size: number) => void
+}
+
+function Pagination({
+  currentPage,
+  totalPages,
+  pageSize,
+  totalElements,
+  isAllMode,
+  onGoToPage,
+  onSetPageSize,
+}: PaginationProps) {
+  const isFirst = currentPage === 0
+  const isLast  = isAllMode || currentPage >= totalPages - 1
+
+  return (
+    <div className="wa-pagination">
+      <div className="wa-pagination-info">
+        {isAllMode ? (
+          <span className="wa-meta">
+            Exibindo todos os {numberFormatter.format(totalElements)} livros
+          </span>
+        ) : (
+          <span className="wa-meta">
+            Página {currentPage + 1} de {numberFormatter.format(totalPages)}
+            {' '}·{' '}
+            {numberFormatter.format(totalElements)} livros
+          </span>
+        )}
+      </div>
+
+      <div className="wa-pagination-controls">
+        <div className="wa-pagination-size">
+          <span className="wa-label">Por página</span>
+          {PAGE_SIZE_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => onSetPageSize(opt.value)}
+              className={`wa-pagination-chip ${pageSize === opt.value ? 'is-active' : ''}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {!isAllMode && totalPages > 1 && (
+          <div className="wa-pagination-nav">
+            <button
+              className="wa-pagination-btn"
+              onClick={() => onGoToPage(0)}
+              disabled={isFirst}
+              aria-label="Primeira página"
+            >
+              ««
+            </button>
+            <button
+              className="wa-pagination-btn"
+              onClick={() => onGoToPage(currentPage - 1)}
+              disabled={isFirst}
+              aria-label="Página anterior"
+            >
+              ‹
+            </button>
+            <button
+              className="wa-pagination-btn"
+              onClick={() => onGoToPage(currentPage + 1)}
+              disabled={isLast}
+              aria-label="Próxima página"
+            >
+              ›
+            </button>
+            <button
+              className="wa-pagination-btn"
+              onClick={() => onGoToPage(totalPages - 1)}
+              disabled={isLast}
+              aria-label="Última página"
+            >
+              »»
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── BookList (página principal) ─────────────────────────────
 export function BookList() {
-  const { books, isLoading, isRefreshing, error, refresh } = useBooks()
+  const {
+    books,
+    pagedData,
+    isLoading,
+    isRefreshing,
+    error,
+    currentPage,
+    pageSize,
+    totalPages,
+    refresh,
+    goToPage,
+    setPageSize,
+  } = useBooks()
+
   const [selectedBook, setSelectedBook] = useState<Book | null>(null)
   const [showNewBook,  setShowNewBook]  = useState(false)
 
@@ -80,11 +194,13 @@ export function BookList() {
     return (saved === 'kinari' || saved === 'sumi' || saved === 'sepia') ? saved : 'kinari'
   })
 
-  // Aplica o tema no <html> e persiste
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('wabi-theme', theme)
   }, [theme])
+
+  const totalElements = pagedData?.totalElements ?? 0
+  const isAllMode     = pageSize === 0
 
   return (
     <div className="wa-app">
@@ -122,7 +238,7 @@ export function BookList() {
       <main className="wa-main">
 
         {/* Hero com métricas */}
-        <Hero books={books} />
+        <Hero books={books} totalElements={totalElements} />
 
         {/* Coleção */}
         <section className="wa-collection">
@@ -133,8 +249,10 @@ export function BookList() {
             </div>
             {!isLoading && !error && (
               <p className="wa-meta">
-                {numberFormatter.format(books.length)}{' '}
-                {books.length === 1 ? 'livro sincronizado' : 'livros sincronizados'}
+                {isAllMode
+                  ? `${numberFormatter.format(totalElements)} ${totalElements === 1 ? 'livro sincronizado' : 'livros sincronizados'}`
+                  : `Página ${currentPage + 1} de ${numberFormatter.format(totalPages)}`
+                }
               </p>
             )}
           </div>
@@ -179,6 +297,19 @@ export function BookList() {
                 <BookCard key={book.id} book={book} onClick={setSelectedBook} />
               ))}
             </div>
+          )}
+
+          {/* Paginação */}
+          {!isLoading && !error && totalElements > 0 && (
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              totalElements={totalElements}
+              isAllMode={isAllMode}
+              onGoToPage={goToPage}
+              onSetPageSize={setPageSize}
+            />
           )}
         </section>
 

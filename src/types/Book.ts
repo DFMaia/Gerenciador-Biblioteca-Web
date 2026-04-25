@@ -17,3 +17,12 @@ export interface Book {
   bookRating: number | null
   publisher: string | null
 }
+
+export interface PagedBooks {
+  content: Book[]
+  totalElements: number
+  totalPages: number
+  currentPage: number
+  pageSize: number
+  last: boolean
+}

@@ -1,5 +1,5 @@
 BANK-MEMORY — Gerenciador de Biblioteca Web
-Última atualização: 21/04/2026 (sessão 2 — final)
+Última atualização: 25/04/2026
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 INSTRUÇÃO PARA A IA — LEIA ANTES DE QUALQUER RESPOSTA
@@ -521,38 +521,87 @@ CONSTANTES NO ARQUIVO:
   EDITION_FORMATS: ['ANIVERSARIO','BILINGUE','BOLSO','BROCHURA','CAPA_DURA','COMEMORATIVA','EPUB','LUXO']
   label(value): formata enum para display (REALISMO_MAGICO → "Realismo magico")
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FUNCIONALIDADE EM IMPLEMENTAÇÃO — "PESQUISAR E ATUALIZAR" (22/04/2026)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+FLUXO COMPLETO (decidido com Diego, 22/04/2026):
+1. Usuário clica em "Pesquisar e Atualizar" — card agora ativo (deixa de ser disabled)
+2. Aparece formulário pequeno: Título, Autor, Editora (opcional) + botão "Buscar"
+3. Frontend chama GET /api/google-books/search?title=...&author=...&publisher=...
+4. Se retornar 404 (lista vazia do backend) → exibir mensagem "Livro não encontrado"
+5. Se retornar 200 com lista → exibir lista de cards de resultado para o usuário escolher
+6. Usuário seleciona um card → formulário expande progressivamente com dados pré-preenchidos
+7. Formulário idêntico ao manual (Obra + Edição + Detalhes) + campo URL da capa + preview da imagem
+8. Todos os campos pré-preenchidos podem ser editados pelo usuário
+9. Usuário preenche campos que faltam → clica "Adicionar à biblioteca"
+10. Frontend chama POST /api/editions → sucesso → animação confirmação → fecha → refresh
+
+✅ maxResults: 20 resultados por busca
+✅ Fallback: só quando primeira busca retorna zero resultados
+✅ Campos pós-seleção: todos editáveis
+✅ Campos obrigatórios (AMBOS os modos): title + author + publisher
+   — o comportamento atual (só title+author) está ERRADO e será corrigido
+✅ Animação de sucesso: a mesma já existente será reutilizada no modo busca
+
+MUDANÇAS NO BACKEND (IA fará após confirmação de Diego):
+* GoogleBooksClient: retorna List<GoogleBooksResultDTO> ao invés de Optional
+* GoogleBooksController: retorna List<GoogleBooksResultDTO>, 404 se vazia
+
+ARQUIVOS NOVOS/ALTERADOS NO FRONTEND:
+* src/types/GoogleBooks.ts (NOVO) — tipo GoogleBooksResult espelhando o DTO do backend
+* src/api/googleBooksApi.ts (NOVO) — searchBooks(title, author, publisher?) → Promise<GoogleBooksResult[]>
+* src/components/NewBookModal.tsx (ALTERAR) — implementar fluxo completo de busca
+* src/index.css (ALTERAR) — estilos para cards de resultado da busca
+
+TAMBÉM PENDENTE (Diego pediu na mesma sessão):
+* Formulário manual: adicionar campo URL da capa + preview da imagem
+  (field coverUrl faltando na seção Detalhes; imagem inline ao lado do campo)
+
+ESTADO DO MODO 'search' no NewBookModal (a implementar):
+  searchForm: { title: '', author: '', publisher: '' }  ← step 1
+  searchResults: GoogleBooksResult[]                    ← step 2: lista de resultados
+  searchLoading: boolean
+  searchError: string | null
+  selectedResult: GoogleBooksResult | null              ← step 3: item escolhido
+  Quando selectedResult !== null: formulário expande com dados pré-preenchidos
+    (igual ao manual mas com coverUrl + preview)
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PRÓXIMOS PASSOS (prioridade)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. TESTAR o fluxo completo:
-   - Iniciar backend (porta 8080) + web (npm run dev, porta 8081)
-   - Clicar "+ Novo livro"
-   - Selecionar "Adicionar dados manualmente"
-   - Preencher os campos obrigatórios
-   - Clicar "Adicionar à sua biblioteca"
-   - Verificar se o livro aparece na lista após refresh
+IMPLEMENTADO (23/04/2026):
+✅ src/types/GoogleBooks.ts — interface GoogleBooksResult (espelha GoogleBooksResponseDTO)
+✅ src/api/googleBooksApi.ts — searchGoogleBooks(title, author, publisher?) → Promise<GoogleBooksResult[]>
+✅ src/components/NewBookModal.tsx — fluxo completo implementado:
+   - Mode: 'manual' | 'search' | null
+   - "Pesquisar e Atualizar" card ativo (sem disabled)
+   - Formulário de busca: título + autor + editora (opcional) + botão "Buscar"
+   - Lista de resultados com capa, título, autor, editora, ano
+   - Seleção de resultado pré-preenche o formulário de edição
+   - Formulário de edição aparece em ambos os modos (manual e search+seleção)
+   - campo coverUrl + preview da imagem adicionados
+   - canSubmit: agora exige title + author + publisher (editora obrigatória)
+   - Animação de sucesso reutilizada em ambos os modos
+✅ src/index.css — classes novas: .wa-search-section, .wa-search-form, .wa-search-actions,
+   .wa-search-results, .wa-search-result (.is-selected), .wa-search-result-cover,
+   .wa-search-result-cover-init, .wa-search-result-body, .wa-search-result-title,
+   .wa-search-result-author, .wa-search-result-meta, .wa-form-cover-preview
+✅ TypeScript: tsc --noEmit limpo
 
-2. IMPLEMENTAR o card "Pesquisar e Atualizar" no modal (Fase 2 — Google Books):
-   - Backend já está pronto: GET /google-books/search (GoogleBooksClient + GoogleBooksController)
-   - Frontend: ativar o card desabilitado
-   - Passo 1: usuario preenche título+autor+editora → "Buscar"
-   - Frontend chama GET /api/google-books/search?title=...&author=...&publisher=...
-   - Passo 2: exibir preview card com GoogleBooksResultDTO
-   - Passo 3: usuário preenche genre+editionType+format+editionNumber → "Salvar"
-   - Frontend monta EditionRequest combinando dados do Google Books + campos do usuário
-
-3. Melhorias futuras:
-   - Labels de gênero com acentos corretos (REALISMO_MAGICO → "Realismo Mágico")
-   - Select de gênero com busca (input filtrável, pois são ~180 opções)
-   - Filtros por status na coleção
-   - Skeleton loading em vez de texto "Carregando livros…"
+Melhorias futuras (baixa prioridade):
+- Labels de gênero com acentos corretos (REALISMO_MAGICO → "Realismo Mágico")
+- Select de gênero com busca/filtro (input filtrável, pois são ~180 opções)
+- Filtros por status na coleção
+- Skeleton loading em vez de texto "Carregando livros…"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 O QUE NÃO EXISTE NO FRONTEND (ainda)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-* Card "Pesquisar e Atualizar" funcional (desabilitado, "Em breve")
+* Card "Pesquisar e Atualizar" funcional (EM IMPLEMENTAÇÃO — 22/04/2026)
+* Campo URL da capa + preview da imagem no formulário manual (EM IMPLEMENTAÇÃO)
 * Filtros por status de leitura
 * Busca por título/autor
 * Skeleton loading
@@ -639,6 +688,68 @@ HISTÓRICO DE SESSÕES
   - .wa-success-check
   - .wa-success-title
   - .wa-success-sub
+* Validação:
+  - npm run lint OK
+  - npm run build OK
+
+22/04/2026 — Refinamento da animação de sucesso (sessão 5)
+* Diego identificou um ponto solto aparecendo dentro do círculo durante a animação
+  de confirmação do cadastro manual
+* Diagnóstico: o ponto não era um elemento separado; era um artefato visual causado por
+  stroke-linecap: round no círculo animado com stroke-dashoffset
+* Correção aplicada:
+  - src/index.css: .wa-success-circle agora usa stroke-linecap: butt
+  - o check continua com acabamento arredondado; apenas o círculo animado perdeu o cap
+    redondo para eliminar o ponto feio dentro do ícone
+* Validação:
+  - npm run lint OK
+  - npm run build OK
+
+22/04/2026 — Segunda correção do artefato no ícone de sucesso (sessão 6)
+* O ponto ainda aparecia mesmo após o ajuste do círculo
+* Novo diagnóstico: o artefato mais provável restante vinha do path do check oculto,
+  que ainda podia renderizar um ponto por causa do traço arredondado antes de começar
+  a animação
+* Correção aplicada:
+  - src/index.css: .wa-success-check agora começa com opacity: 0
+  - @keyframes wa-success-check-draw agora revela a opacidade só no início real do desenho
+* Efeito esperado: o check fica totalmente invisível até o momento em que começa a ser
+  desenhado, eliminando o ponto solto antes da hora
+* Validação:
+  - npm run lint OK
+  - npm run build OK
+
+22/04/2026 — Planejamento de "Pesquisar e Atualizar" + campo capa no manual (sessão 7)
+* Diego descreveu o fluxo completo de busca via Google Books no modal
+* Decisão: backend vai retornar LISTA de resultados (não mais um único resultado)
+* Decisão: fallback só quando primeira busca retorna zero resultados
+* Decisão: POST /editions reutilizado integralmente — backend não muda na camada de salvamento
+* Pendente: Diego responder (a) max resultados, (b) campos editáveis pós-seleção
+* Memórias backend e frontend atualizadas com o plano completo
+* Implementação aguarda confirmação de Diego
+
+25/04/2026 — Preview vivo da URL da capa no cadastro
+* Contexto humano da sessão: Diego relatou que a depressão estava muito chata e pediu
+  ritmo direto, com a IA implementando o que ele pedir no back e no web/front.
+* Instrução de trabalho desta sessão: quando Diego pedir uma alteração, a IA pode
+  implementar diretamente no backend e/ou frontend depois de dizer o que entendeu e
+  o que pretende alterar. Ainda deve avisar antes de editar.
+* Pedido implementado no web: no modal "Nova entrada", o campo "URL da capa" agora
+  tem preview vivo da imagem.
+* Funciona tanto no modo manual quanto no fluxo "Pesquisar e Atualizar" via Google Books,
+  inclusive quando o resultado do Google não trouxer coverUrl e Diego preencher a URL
+  manualmente depois.
+* Se o usuário altera a URL, o componente reinicia a busca da imagem e troca o preview.
+  A implementação usa key baseada na URL limpa para remontar o preview e não reaproveitar
+  estado visual antigo.
+* Se a imagem carrega, ela é exibida imediatamente no formulário. Enquanto carrega, o
+  formulário mostra "Carregando capa...". Se falhar, mostra "Não consegui carregar essa
+  imagem." sem bloquear o cadastro.
+* Arquivos alterados:
+  - src/components/NewBookModal.tsx: criado CoverUrlPreview/CoverPreviewImage e removido
+    o onError antigo que escondia a imagem permanentemente.
+  - src/index.css: adicionados estilos .wa-form-cover-preview-shell,
+    .wa-form-cover-preview-stage e estados loading/error.
 * Validação:
   - npm run lint OK
   - npm run build OK
