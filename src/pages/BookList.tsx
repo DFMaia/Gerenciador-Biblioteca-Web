@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { BookCard } from '../components/BookCard'
 import { DetailSheet } from '../components/DetailSheet'
+import { LibrarySearchView } from '../components/LibrarySearchView'
 import { NewBookModal } from '../components/NewBookModal'
 import { useBooks } from '../hooks/useBooks'
-import type { Book } from '../types/Book'
+import type { Book, BookMetrics } from '../types/Book'
 
 type Theme = 'kinari' | 'sumi' | 'sepia'
 
@@ -33,12 +34,7 @@ function ThemeSwitcher({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme)
 }
 
 // ── Hero ────────────────────────────────────────────────────
-function Hero({ books, totalElements }: { books: Book[]; totalElements: number }) {
-  const lendo        = books.filter(b => b.status === 'LENDO').length
-  const lidos        = books.filter(b => b.status === 'LIDO').length
-  const trackedPages = books.reduce((t, b) => t + (b.currentPage ?? 0), 0)
-  const totalPages   = books.reduce((t, b) => t + (b.totalPages  ?? 0), 0)
-
+function Hero({ metrics, totalElements }: { metrics: BookMetrics | null; totalElements: number }) {
   return (
     <section className="wa-hero">
       <div className="wa-hero-head">
@@ -51,9 +47,13 @@ function Hero({ books, totalElements }: { books: Book[]; totalElements: number }
 
       <div className="wa-metrics">
         <Metric label="Acervo"  value={numberFormatter.format(totalElements)} sub="livros no total"             />
-        <Metric label="Lendo"   value={numberFormatter.format(lendo)}         sub="em andamento"                />
-        <Metric label="Lidos"   value={numberFormatter.format(lidos)}         sub="concluídos"                  />
-        <Metric label="Páginas" value={numberFormatter.format(trackedPages)}  sub={`de ${numberFormatter.format(totalPages)} na página`} />
+        <Metric label="Lendo"   value={numberFormatter.format(metrics?.readingBooks ?? 0)} sub="em andamento"                />
+        <Metric label="Lidos"   value={numberFormatter.format(metrics?.readBooks ?? 0)}    sub="concluídos"                  />
+        <Metric
+          label="Páginas"
+          value={numberFormatter.format(metrics?.trackedPages ?? 0)}
+          sub={`de ${numberFormatter.format(metrics?.totalPages ?? 0)} no acervo`}
+        />
       </div>
     </section>
   )
@@ -188,6 +188,7 @@ export function BookList() {
 
   const [selectedBook, setSelectedBook] = useState<Book | null>(null)
   const [showNewBook,  setShowNewBook]  = useState(false)
+  const [view, setView] = useState<'home' | 'search'>('home')
 
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem('wabi-theme')
@@ -201,6 +202,18 @@ export function BookList() {
 
   const totalElements = pagedData?.totalElements ?? 0
   const isAllMode     = pageSize === 0
+  const metrics       = pagedData?.metrics ?? null
+
+  if (view === 'search') {
+    return (
+      <div className="wa-app">
+        <LibrarySearchView
+          onBack={() => setView('home')}
+          onSaved={refresh}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="wa-app">
@@ -218,17 +231,20 @@ export function BookList() {
 
             <button
               className="wa-btn wa-btn-secondary"
-              onClick={refresh}
+              onClick={() => {
+                setSelectedBook(null)
+                setView('search')
+              }}
               disabled={isLoading || isRefreshing}
             >
-              {isRefreshing ? 'Sincronizando…' : 'Atualizar'}
+              Pesquisar no seu acervo
             </button>
 
             <button
               className="wa-btn wa-btn-primary"
               onClick={() => setShowNewBook(true)}
             >
-              + Novo livro
+              Novo livro
             </button>
           </div>
         </div>
@@ -238,7 +254,7 @@ export function BookList() {
       <main className="wa-main">
 
         {/* Hero com métricas */}
-        <Hero books={books} totalElements={totalElements} />
+        <Hero metrics={metrics} totalElements={totalElements} />
 
         {/* Coleção */}
         <section className="wa-collection">

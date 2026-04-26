@@ -77,7 +77,17 @@ export function BookCard({ book, onClick }: BookCardProps) {
                 <span>{progress}%</span>
               </div>
               <div className="wa-progress-track">
-                <div className="wa-progress-fill" style={{ width: `${progress}%` }} />
+                <div
+                  className="wa-progress-fill"
+                  style={{
+                    width: `${progress}%`,
+                    ...(progress > 0 ? {
+                      backgroundImage: 'linear-gradient(to right, #8ed46a, #3d5c18)',
+                      backgroundSize: `${(100 / progress) * 100}% 100%`,
+                      backgroundPosition: 'left center',
+                    } : {}),
+                  }}
+                />
               </div>
               <div className="wa-progress-foot">
                 <span>{numberFormatter.format(book.currentPage ?? 0)} páginas lidas</span>

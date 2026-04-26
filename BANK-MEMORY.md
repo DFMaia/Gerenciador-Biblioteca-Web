@@ -123,6 +123,9 @@ Regras críticas:
 * NUNCA criar .env.local com VITE_API_BASE_URL=http://localhost:8080 — quebra o proxy
 * strictPort: true — Vite sobe sempre na 8081 ou falha
 * Proxy remove /api: chamada para /api/books chega no backend como /books
+* A IA pode iniciar o web para validar uma alteração quando fizer sentido, mas deve
+  interromper a execução assim que terminar a validação. Não deixar o Vite rodando
+  depois do teste.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CONEXÃO COM O BACKEND
@@ -133,12 +136,14 @@ CONEXÃO COM O BACKEND
 * Proxy Vite: /api/* → http://localhost:8080/*
 * Backend precisa estar rodando antes do web
 * Endpoints consumidos:
-  - GET /books  → booksApi.ts → getAllBooks()
+  - GET /books?page=...&size=... → booksApi.ts → getAllBooks() (lista paginada + metrics globais)
+  - GET /books/search?query=... → booksApi.ts → searchBooks() (pesquisa livros já salvos no banco)
+  - PATCH /books/{id} → booksApi.ts → updateBook() (edita campos do Book, exceto título/autor)
   - POST /editions → editionsApi.ts → saveEdition()
-  - GET /google-books/search → não consumido ainda (backend implementado, frontend pendente)
+  - GET /google-books/search → googleBooksApi.ts → searchGoogleBooks()
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ESTRUTURA DE ARQUIVOS ATUAL (estado real em 21/04/2026)
+ESTRUTURA DE ARQUIVOS ATUAL (estado real em 25/04/2026)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ```
@@ -152,21 +157,26 @@ Gerenciador-Biblioteca-Web/
 │   ├── main.tsx             ← entry point, monta <App /> no #root em StrictMode
 │   ├── App.tsx              ← apenas renderiza <BookList />
 │   ├── App.css              ← vazio (sem uso)
-│   ├── index.css            ← Wabi Paper completo: tokens 3 temas + .wa-* + modal/form
+│   ├── index.css            ← Wabi Paper completo: tokens 3 temas + .wa-* + modal/form/search
 │   ├── api/
-│   │   ├── booksApi.ts      ← getAllBooks(signal?) → GET /api/books
-│   │   └── editionsApi.ts   ← saveEdition(dto) → POST /api/editions
+│   │   ├── booksApi.ts      ← getAllBooks, searchBooks, updateBook
+│   │   ├── editionsApi.ts   ← saveEdition(dto) → POST /api/editions
+│   │   └── googleBooksApi.ts← searchGoogleBooks() → GET /api/google-books/search
 │   ├── components/
 │   │   ├── BookCard.tsx     ← card clicável, Wabi Paper
 │   │   ├── DetailSheet.tsx  ← painel slide-in da direita ao clicar num card
-│   │   └── NewBookModal.tsx ← modal centralizado "+ Novo livro" (NOVO 21/04/2026 s2)
+│   │   ├── LibrarySearchView.tsx ← tela "Pesquisar" para editar livros salvos no banco
+│   │   └── NewBookModal.tsx ← modal centralizado "+ Novo livro" + Google Books + preview capa
+│   ├── constants/
+│   │   └── bookOptions.ts   ← GENRES, EDITION_FORMATS e label()
 │   ├── hooks/
 │   │   └── useBooks.ts      ← hook de estado da lista de livros
 │   ├── pages/
 │   │   └── BookList.tsx     ← página principal completa
 │   └── types/
-│       ├── Book.ts          ← interface Book, tipo ReadingStatus
-│       └── Edition.ts       ← EditionRequest, EditionType, EditionFormat (NOVO)
+│       ├── Book.ts          ← Book, BookUpdateRequest, BookMetrics, ReadingStatus, PagedBooks
+│       ├── Edition.ts       ← EditionRequest, EditionType, EditionFormat
+│       └── GoogleBooks.ts   ← GoogleBooksResult
 └── public/
     ├── favicon.svg
     └── icons.svg
@@ -240,7 +250,7 @@ Form (NOVO): .wa-form .wa-form-section-title .wa-form-group .wa-form-label .wa-f
 Footer: .wa-footer .wa-footer-row
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-src/types/Book.ts — conteúdo completo
+src/types/Book.ts — conteúdo atual
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ```typescript
@@ -262,6 +272,41 @@ export interface Book {
   status: ReadingStatus | null
   bookRating: number | null
   publisher: string | null
+}
+
+export interface BookUpdateRequest {
+  genre: string | null
+  description: string | null
+  coverUrl: string | null
+  isbn: string | null
+  totalPages: number | null
+  publishedYear: number | null
+  status: ReadingStatus | null
+  currentPage: number | null
+  startDate: string | null
+  endDate: string | null
+  bookRating: number | null
+  publisher: string | null
+}
+
+export interface BookMetrics {
+  totalBooks: number
+  readingBooks: number
+  readBooks: number
+  unreadBooks: number
+  abandonedBooks: number
+  trackedPages: number
+  totalPages: number
+}
+
+export interface PagedBooks {
+  content: Book[]
+  totalElements: number
+  totalPages: number
+  currentPage: number
+  pageSize: number
+  last: boolean
+  metrics: BookMetrics
 }
 ```
 
@@ -291,23 +336,19 @@ export interface EditionRequest {
 ```
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-src/api/booksApi.ts — conteúdo completo
+src/api/booksApi.ts — funções atuais
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-```typescript
-import type { Book } from '../types/Book'
-
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '')
-
-export async function getAllBooks(signal?: AbortSignal): Promise<Book[]> {
-  const response = await fetch(`${API_BASE_URL}/books`, {
-    headers: { Accept: 'application/json' },
-    signal,
-  })
-  if (!response.ok) throw new Error('Nao foi possivel carregar os livros.')
-  return response.json() as Promise<Book[]>
-}
-```
+* getAllBooks(page, size, signal?) → GET /api/books?page=...&size=...
+  - Retorna PagedBooks, não mais Book[] puro.
+  - Mensagem de erro: "Nao foi possivel carregar os livros."
+* searchBooks(query, signal?) → GET /api/books/search?query=...
+  - Pesquisa somente livros já salvos no banco.
+  - Usado pela tela "Pesquisar" do topo da home.
+* updateBook(bookId, dto) → PATCH /api/books/{id}
+  - Envia BookUpdateRequest em JSON.
+  - Atualiza dados editáveis do Book sem permitir alterar título/autor.
+  - Se o backend retornar JSON com `message`, reaproveita essa mensagem.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 src/api/editionsApi.ts — conteúdo completo (NOVO 21/04/2026 s2)
@@ -335,9 +376,11 @@ export async function saveEdition(dto: EditionRequest): Promise<void> {
 src/hooks/useBooks.ts — descrição
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Hook de estado para a lista de livros. Retorna: { books, isLoading, isRefreshing, error, refresh }
+Hook de estado para a lista paginada de livros. Retorna:
+{ books, pagedData, isLoading, isRefreshing, error, currentPage, pageSize, totalPages,
+  refresh, goToPage, setPageSize }
 * isLoading: true apenas na primeira carga (hasLoadedOnce é false)
-* isRefreshing: true nas recargas subsequentes (botão "Atualizar")
+* isRefreshing: true nas recargas subsequentes
 * hasLoadedOnce (useRef): distingue primeiro carregamento dos subsequentes
 * refreshKey (useState): incrementar força re-execução do useEffect
 * AbortController: cancela fetch ao desmontar ou ao trocar refreshKey
@@ -349,7 +392,7 @@ src/pages/BookList.tsx — estrutura completa
 
 Importações:
   useEffect, useState (react)
-  BookCard, DetailSheet, NewBookModal (components)
+  BookCard, DetailSheet, LibrarySearchView, NewBookModal (components)
   useBooks (hooks)
   Book (types)
 
@@ -359,22 +402,26 @@ Componentes inline (definidos no mesmo arquivo):
   Metric({ label, value, sub }) — bloco de métrica individual
 
 Estado em BookList:
-  books, isLoading, isRefreshing, error, refresh ← useBooks()
-  selectedBook: Book | null  ← abre/fecha DetailSheet
-  showNewBook: boolean       ← abre/fecha NewBookModal
+  books, pagedData, isLoading, isRefreshing, error, currentPage, pageSize, totalPages, refresh,
+  goToPage, setPageSize ← useBooks()
+  selectedBook: Book | null       ← abre/fecha DetailSheet
+  showNewBook: boolean            ← abre/fecha NewBookModal
+  view: 'home' | 'search'         ← alterna home e tela de pesquisa/edição
   theme: 'kinari'|'sumi'|'sepia' ← persistido em localStorage 'wabi-theme'
 
 Header:
   - Eyebrow: "Biblioteca pessoal"
   - Título h1: "Gerenciador de Biblioteca"
   - ThemeSwitcher chips
-  - Botão "Atualizar" (wa-btn-secondary) — chama refresh(), disabled durante loading/refreshing
+  - Botão "Pesquisar" (wa-btn-secondary) — muda view para 'search'
   - Botão "+ Novo livro" (wa-btn-primary) — onClick={() => setShowNewBook(true)}
 
 Hero:
   - Eyebrow: "Laboratório de design"
   - Título h2: "Sua biblioteca" (fonte enorme clamp 72px-144px)
   - 4 métricas em grid horizontal: Acervo / Lendo / Lidos / Páginas
+  - Lendo, Lidos e Páginas usam pagedData.metrics, não a lista visível de cards.
+    Isso garante que a home reflita o banco inteiro mesmo quando a coleção está paginada.
 
 Coleção:
   - Label "Livros" + h3 "Coleção atual" + count à direita
@@ -384,6 +431,11 @@ Footer:
   - "蔵 · Gerenciador de Biblioteca" | "GET /books · localhost:8080"
 
 Renderização final:
+  Se view === 'search':
+    renderiza <LibrarySearchView onBack={() => setView('home')} onSaved={refresh} />
+    sem header/home, para a tela ficar limpa com seta de voltar + campo de busca.
+
+  Se view === 'home':
   <DetailSheet book={selectedBook} onClose={() => setSelectedBook(null)} />
   <NewBookModal
     open={showNewBook}
@@ -436,21 +488,66 @@ Conteúdo:
   hr + sinopse em itálico (só se description existir)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+src/components/LibrarySearchView.tsx — tela "Pesquisar" (NOVO 25/04/2026)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Objetivo: pesquisar e atualizar livros que já existem no banco. Não usa Google Books.
+
+Entrada:
+* Props: { onBack: () => void, onSaved: () => void }
+* onBack volta para a home.
+* onSaved chama refresh() da home após salvar alterações.
+
+Fluxo:
+1. BookList troca view para 'search' quando o usuário clica no botão "Pesquisar".
+2. A tela renderiza apenas o topo da busca, sem a home, com:
+   - botão de voltar minimalista usando seta para a esquerda
+   - input grande ao lado direito da seta
+3. Ao digitar, o componente faz debounce curto e chama searchBooks(query).
+4. Durante digitação/busca, aparece animação Wabi Paper de livro aberto com páginas virando.
+5. Resultados aparecem como lista lateral com capa, título, autor, editora/ano.
+6. Ao clicar em um resultado, abre um card/editor expandido com todos os dados do Book.
+7. Título e autor aparecem como campos travados/readOnly.
+8. Campos editáveis: publisher, genre, status, bookRating, currentPage, totalPages,
+   startDate, endDate, publishedYear, isbn, coverUrl, description.
+9. Botão de salvar não aparece no fim do formulário; fica apenas abaixo da capa.
+10. Ao salvar, o botão verde "Salvar" transforma em círculo com o mesmo SVG de sucesso
+    usado no modal de cadastro.
+
+Detalhes visuais:
+* Usa tokens Wabi Paper existentes: paper/ink/seal/moss/gradient-progress.
+* A barra de progresso do editor usa transição de 2s para mudanças de largura.
+* Se status = ABANDONADO, a barra vai para 100% e um overlay vermelho (seal) entra com
+  transição de opacidade de 2s, fazendo a cor virar vermelha gradualmente.
+* A capa é maior que no card da home; se não houver coverUrl, usa iniciais como placeholder.
+* O botão "Salvar" abaixo da capa nasce pequeno e cresce até a largura da capa.
+
+Classes novas principais:
+* .wa-library-search-main, .wa-library-search, .wa-library-search-top
+* .wa-library-back, .wa-library-search-field, .wa-library-search-input
+* .wa-library-search-content, .wa-library-results, .wa-library-result*
+* .wa-library-book-expanded, .wa-library-cover-large, .wa-library-cover-save
+* .wa-library-progress*, .wa-library-form, .wa-library-locked-input
+* .wa-open-book-loader, .wa-open-book, .wa-open-book-page*
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 src/components/NewBookModal.tsx — estrutura completa (NOVO 21/04/2026 s2)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Props: { open: boolean, onClose: () => void, onSaved: () => void }
 
 ESTADO INTERNO:
-  mode: 'manual' | null  — qual card está selecionado
+  mode: 'manual' | 'search' | null  — qual card está selecionado
   form: FormState        — todos os campos do formulário (strings, mesmo números)
   loading: boolean       — durante o POST
   error: string | null   — mensagem de erro exibida no form
+  isSuccess: boolean     — troca o modal para a animação de confirmação
+  searchForm/searchResults/searchLoading/searchError/selectedResult — fluxo Google Books
 
 EMPTY_FORM (estado inicial e de reset):
   { title:'', author:'', genre:'', editionType:'', format:'',
     editionNumber:'', publisher:'', totalPages:'', language:'',
-    publishedYear:'', isbn:'', description:'' }
+    publishedYear:'', isbn:'', coverUrl:'', description:'' }
 
 CICLO DE VIDA:
   useEffect: quando open=true → adiciona listener Escape + bloqueia body scroll
@@ -464,16 +561,15 @@ set(field)(event):
   helper genérico → setForm(prev => ({ ...prev, [field]: e.target.value }))
 
 canSubmit:
-  form.title.trim() && form.author.trim() && form.genre &&
-  form.editionType && form.format && form.editionNumber.trim() && !loading
+  form.title.trim() && form.author.trim() && form.publisher.trim() && !loading
 
 handleSubmit(e):
   e.preventDefault() → if (!canSubmit) return
   monta EditionRequest: campos string viram number onde necessário (Number()),
     campos opcionais vazios → null
-  await saveEdition(dto) → onSaved() + handleClose()
+  await saveEdition(dto) → setIsSuccess(true)
   catch → setError(mensagem)
-  finally → setLoading(false)
+  finally → setLoading(false) quando não entrou em sucesso
 
 ESTRUTURA JSX:
   Backdrop (.wa-modal-backdrop) → onClick=handleClose
@@ -486,9 +582,12 @@ ESTRUTURA JSX:
         Choice grid (.wa-choice-grid):
           Card 1 "Adicionar dados manualmente" (.wa-choice-card, is-active se mode==='manual')
             toggle: setMode(mode === 'manual' ? null : 'manual')
-          Card 2 "Pesquisar e Atualizar" (.wa-choice-card.is-disabled, disabled=true)
-            subtitle: "Via Google Books · Em breve"
-        Form reveal (.wa-form-reveal, is-open quando mode==='manual'):
+          Card 2 "Pesquisar e Atualizar" (.wa-choice-card, is-active se mode==='search')
+            abre formulário de busca via Google Books
+        Se mode==='search':
+          formulário pequeno Título + Autor + Editora(opcional) + botão Buscar
+          resultados em lista com capa; clique preenche o formulário
+        Form reveal (.wa-form-reveal, is-open quando mode==='manual' ou search com resultado selecionado):
           Inner (.wa-form-reveal-inner) ← overflow:hidden para a animação funcionar
             <form onSubmit=handleSubmit>
               Seção "Obra":
@@ -500,6 +599,7 @@ ESTRUTURA JSX:
                 row: Editora | Idioma
                 row: Ano | Páginas
                 full: ISBN
+                full: URL da capa + preview vivo
                 full: Descrição (textarea)
               {error && <div className="wa-form-error">}
               Actions: [Cancelar] [Adicionar à sua biblioteca]
@@ -516,10 +616,9 @@ ANIMAÇÃO DO MODAL:
   @keyframes wa-modal-in: scale(0.96)+translateY(10px) opacity:0 → scale(1) opacity:1
   Duração: 0.22s var(--ease)
 
-CONSTANTES NO ARQUIVO:
-  GENRES: array com todos os ~180 valores do enum Genre do backend (as const)
-  EDITION_FORMATS: ['ANIVERSARIO','BILINGUE','BOLSO','BROCHURA','CAPA_DURA','COMEMORATIVA','EPUB','LUXO']
-  label(value): formata enum para display (REALISMO_MAGICO → "Realismo magico")
+CONSTANTES:
+  GENRES, EDITION_FORMATS e label(value) ficam em src/constants/bookOptions.ts
+  para serem reaproveitados também por LibrarySearchView.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FUNCIONALIDADE EM IMPLEMENTAÇÃO — "PESQUISAR E ATUALIZAR" (22/04/2026)
@@ -600,14 +699,11 @@ Melhorias futuras (baixa prioridade):
 O QUE NÃO EXISTE NO FRONTEND (ainda)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-* Card "Pesquisar e Atualizar" funcional (EM IMPLEMENTAÇÃO — 22/04/2026)
-* Campo URL da capa + preview da imagem no formulário manual (EM IMPLEMENTAÇÃO)
 * Filtros por status de leitura
-* Busca por título/autor
 * Skeleton loading
-* Paginação ou virtualização (exibe todos os livros de uma vez)
 * Roteamento (React Router não instalado, app é single page)
-* Edição de livro existente (PATCH /editions/{id} e PATCH /books/{id} não implementados)
+* Edição de Edition existente via PATCH /editions/{id}
+* Histórico/listagem de edições de um mesmo livro
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 HISTÓRICO DE SESSÕES
@@ -753,3 +849,165 @@ HISTÓRICO DE SESSÕES
 * Validação:
   - npm run lint OK
   - npm run build OK
+
+25/04/2026 — Tela "Pesquisar" para atualizar livros salvos no banco
+* Diego esclareceu que a nova pesquisa não é Google Books: ela pesquisa apenas livros
+  já salvos no banco e serve para atualizar dados do Book existente.
+* Botão do topo:
+  - O botão "Atualizar" ao lado de "+ Novo livro" virou "Pesquisar".
+  - Ao clicar, a home sai de cena e entra uma tela limpa de busca/edição.
+* Nova tela:
+  - Criado src/components/LibrarySearchView.tsx.
+  - Topo com seta minimalista para voltar para a home e input de busca ao lado.
+  - Ao digitar, chama GET /api/books/search?query=... via searchBooks().
+  - Enquanto digita/busca, mostra animação de livro aberto com páginas virando,
+    seguindo a linguagem Wabi Paper.
+  - Resultados aparecem em lista com capa, título, autor e metadados.
+  - Ao clicar em um livro, abre editor expandido com todos os dados do Book.
+* Edição:
+  - Título e autor são readOnly/travados.
+  - Editáveis: editora, gênero, status, avaliação, página atual, total de páginas,
+    início, fim, ano, ISBN, URL da capa e descrição.
+  - PATCH /api/books/{id} salva os dados com BookUpdateRequest.
+  - Após salvar, onSaved() chama refresh() da home.
+* Barra de progresso:
+  - A largura da barra anima por 2 segundos quando currentPage muda.
+  - Se status = ABANDONADO, a barra vai para 100% e vira vermelha gradualmente em 2 segundos.
+* Botão salvar:
+  - Não existe botão de salvar no fim do formulário.
+  - O único botão de salvar fica embaixo da capa.
+  - Ele nasce pequeno, cresce até a largura da capa, é verde com texto branco,
+    e após salvar transforma em círculo com o mesmo SVG de sucesso do modal.
+* Refatoração de opções:
+  - Criado src/constants/bookOptions.ts para compartilhar GENRES, EDITION_FORMATS e label()
+    entre NewBookModal e LibrarySearchView.
+  - NewBookModal passou a importar essas constantes, removendo duplicação local.
+* Arquivos alterados/criados:
+  - src/components/LibrarySearchView.tsx (novo)
+  - src/constants/bookOptions.ts (novo)
+  - src/pages/BookList.tsx
+  - src/api/booksApi.ts
+  - src/types/Book.ts
+  - src/components/NewBookModal.tsx
+  - src/index.css
+* Validação:
+  - npm run lint OK
+  - npm run build OK
+
+25/04/2026 — Refinamento visual da tela "Pesquisar"
+* Diego enviou um print marcando dois problemas:
+  - a animação do livro aberto estava no lugar errado; ela deveria aparecer no painel grande
+    à direita, onde fica o editor do livro selecionado.
+  - havia uma linha horizontal solta no estado vazio do editor, visualmente desagradável.
+* Correção aplicada:
+  - LibrarySearchView agora renderiza PageTurningLoader dentro de .wa-library-editor-empty
+    quando existe texto pesquisado e nenhum livro foi selecionado.
+  - O loader foi removido da coluna esquerda de resultados.
+  - .wa-library-editor-empty não tem mais border-bottom.
+  - .wa-open-book-loader não usa mais borda tracejada; no editor ele ocupa o espaço grande
+    com .wa-library-editor-loader.
+* Validação:
+  - npm run lint OK
+  - npm run build OK
+
+25/04/2026 — Preferência de execução do web
+* Diego pediu que a IA não deixe mais o projeto web rodando automaticamente.
+* Regra operacional atualizada: a IA pode iniciar o servidor Vite (`npm run dev`) quando
+  precisar validar visualmente uma alteração, mas deve encerrar a execução logo depois
+  da validação.
+* Nunca deixar a porta 8081 ocupada após terminar os testes/validações.
+* Se a IA tiver iniciado o web e Diego pedir para parar, encerrar o processo e liberar a
+  porta 8081.
+* Nesta sessão, a execução que estava ocupando a porta 8081 foi encerrada.
+
+25/04/2026 — Aumento da animação do livro na tela "Pesquisar"
+* Diego pediu que o livro aberto da animação ficasse bem maior.
+* Ajuste aplicado em src/index.css:
+  - .wa-open-book aumentou de 116x76 para 244x160.
+  - Páginas, pseudo-elementos laterais, lombada, perspectiva e sombra foram redimensionados
+    proporcionalmente para preservar a aparência de livro aberto.
+  - .wa-library-editor-loader passou a ter min-height maior para acomodar a animação.
+* Validação:
+  - npm run lint OK
+  - npm run build OK
+* Importante: o servidor web não foi iniciado automaticamente, respeitando a preferência
+  atual do Diego.
+
+25/04/2026 — Segundo aumento do livro e texto do botão de pesquisa
+* Diego pediu para a animação do livro ficar duas vezes maior do que o tamanho anterior.
+* Ajuste aplicado em src/index.css:
+  - .wa-open-book aumentou de 244x160 para 488x320.
+  - Páginas, lombada, perspectiva e sombra foram novamente dobradas proporcionalmente.
+  - .wa-library-editor-loader passou para min-height 720px para acomodar o livro grande.
+* Ajuste aplicado em src/pages/BookList.tsx:
+  - O botão do topo deixou de mostrar "Pesquisar" e agora mostra
+    "Pesquisar na sua biblioteca" (a classe do botão renderiza em uppercase).
+* Validação:
+  - npm run lint OK
+  - npm run build OK
+* O servidor web não foi iniciado automaticamente.
+
+25/04/2026 — Lombada vermelha da animação com espessura fixa
+* Diego observou que a faixa vermelha no meio da animação do livro parecia mudar de
+  espessura durante a virada das páginas.
+* Ajuste aplicado em src/index.css:
+  - .wa-open-book-spine agora tem largura fixa de 6px, a versão estreita desejada.
+  - A posição passou para left: calc(50% - 3px), mantendo a linha exatamente centralizada.
+  - z-index aumentou para 10 para a lombada ficar visualmente estável acima das páginas
+    animadas, sem aparentar engrossar/afinar.
+* Validação:
+  - npm run lint OK
+  - npm run build OK
+* O servidor web não foi iniciado automaticamente.
+
+25/04/2026 — Botão salvar só aparece após alteração
+* Diego apontou que, ao selecionar um livro na tela "Pesquisar", o botão "Salvar" já
+  aparecia mesmo sem nenhuma alteração no formulário.
+* Regra de UX definida:
+  - ao selecionar um livro, não deve existir botão "Salvar";
+  - o botão só aparece quando algum campo editável for realmente alterado;
+  - ao aparecer, mantém a animação de pequeno para a largura atual da capa;
+  - durante o salvamento e no estado de sucesso, o botão permanece renderizado para
+    poder transformar no círculo/check.
+* Implementação:
+  - LibrarySearchView ganhou comparação entre o form atual e `toForm(selectedBook)`.
+  - `showSaveButton` só fica true quando há diferença real ou quando saveState é
+    `saving`/`saved`.
+  - A key do botão ficou presa ao id do livro, não ao saveState, para preservar a
+    transformação visual de retângulo para círculo.
+* Validação:
+  - npm run lint OK
+  - npm run build OK
+* O servidor web não foi iniciado automaticamente.
+
+25/04/2026 — Hero usa métricas globais do backend
+* Diego percebeu que o contador "Lidos" da home mudava conforme a quantidade de livros
+  exibida na página, porque o front calculava as métricas usando apenas `books`, que é a
+  página atual da coleção.
+* Correção:
+  - Backend passou a enviar `metrics` dentro de PagedBooksDTO.
+  - src/types/Book.ts ganhou BookMetrics e PagedBooks.metrics.
+  - src/pages/BookList.tsx mudou o Hero para receber `metrics` e `totalElements`, não
+    mais a lista de livros visíveis.
+  - "Lendo", "Lidos" e "Páginas" agora refletem todo o banco/acervo, independente da
+    paginação dos cards.
+  - Subtexto de páginas mudou para "de X no acervo".
+* Validação:
+  - npm run lint OK
+  - npm run build OK
+* O servidor web não foi iniciado automaticamente.
+
+25/04/2026 — Ajustes de escala e texto no header
+* Diego apontou que os três botões de tema (Kinari/Sumi/Sépia) e a palavra "Tema"
+  estavam visualmente menores que os botões "Pesquisar" e "Novo livro".
+* Ajuste aplicado em src/index.css:
+  - .wa-theme-switch .wa-label agora usa font-size 12px e letter-spacing 0.22em.
+  - .wa-theme-chip agora usa font-size 12px, letter-spacing 0.22em, padding 10px 24px
+    e min-height 42px, alinhando a escala visual aos botões do header.
+* Ajuste aplicado em src/pages/BookList.tsx:
+  - "Pesquisar na sua biblioteca" mudou para "Pesquisar no seu acervo".
+  - "+ Novo livro" mudou para "Novo livro".
+* Validação:
+  - npm run lint OK
+  - npm run build OK
+* O servidor web não foi iniciado automaticamente.
