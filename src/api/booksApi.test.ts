@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getAllBooks, searchBooks, updateBook } from './booksApi'
+import { deleteBook, getAllBooks, searchBooks, updateBook } from './booksApi'
 import type { Book, BookUpdateRequest, PagedBooks } from '../types/Book'
 
 const mockBook: Book = {
@@ -89,6 +89,19 @@ describe('getAllBooks', () => {
     const calledUrl = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
     expect(calledUrl).toContain('page=2')
     expect(calledUrl).toContain('size=50')
+  })
+
+  it('deve incluir status e ordenação quando informados', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(mockPagedBooks),
+    })
+
+    await getAllBooks(0, 0, { sortOrder: 'DESC', status: 'LENDO' })
+
+    const calledUrl = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    expect(calledUrl).toContain('sortOrder=DESC')
+    expect(calledUrl).toContain('status=LENDO')
   })
 
   it('deve lançar erro quando a resposta não é ok', async () => {
@@ -212,5 +225,42 @@ describe('updateBook', () => {
     await expect(updateBook(1, emptyDto)).rejects.toThrow(
       'Não foi possível salvar as alterações.',
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// deleteBook
+// ---------------------------------------------------------------------------
+
+describe('deleteBook', () => {
+  it('deve apagar o livro quando backend retorna sucesso', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({ ok: true })
+
+    await expect(deleteBook(1)).resolves.toBeUndefined()
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/books/1'),
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('deve lançar erro com mensagem retornada pelo backend', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: () => Promise.resolve({ message: 'Livro não encontrado: 99' }),
+    })
+
+    await expect(deleteBook(99)).rejects.toThrow('Livro não encontrado: 99')
+  })
+
+  it('deve usar mensagem padrão quando backend não retorna JSON válido', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: () => Promise.reject(new SyntaxError('Unexpected token')),
+    })
+
+    await expect(deleteBook(1)).rejects.toThrow('Não foi possível apagar o livro.')
   })
 })

@@ -1,10 +1,19 @@
 /// <reference types="vitest" />
-import { defineConfig } from 'vite'
+import { defineConfig, type UserConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+interface VitestUserConfig extends UserConfig {
+  test: {
+    globals: boolean
+    environment: string
+    setupFiles: string[]
+    css: boolean
+  }
+}
+
 // https://vite.dev/config/
-export default defineConfig({
+const config: VitestUserConfig = {
   plugins: [
     react(),
     tailwindcss(),
@@ -26,4 +35,6 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: false,
   },
-})
+}
+
+export default defineConfig(config)

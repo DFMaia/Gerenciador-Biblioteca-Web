@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getAllBooks } from '../api/booksApi'
 import type { Book, PagedBooks } from '../types/Book'
+import type { SortOrder } from '../types/Preferences'
 
 interface UseBooksResult {
   books: Book[]
@@ -16,15 +17,15 @@ interface UseBooksResult {
   setPageSize: (size: number) => void
 }
 
-export function useBooks(): UseBooksResult {
-  const [pagedData, setPagedData] = useState<PagedBooks | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+export function useBooks(sortOrder: SortOrder = 'ASC'): UseBooksResult {
+  const [pagedData, setPagedData]     = useState<PagedBooks | null>(null)
+  const [isLoading, setIsLoading]     = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError]             = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(0)
-  const [pageSize, setPageSizeState] = useState(20)
-  const [refreshKey, setRefreshKey] = useState(0)
-  const hasLoadedOnce = useRef(false)
+  const [pageSize, setPageSizeState]  = useState(20)
+  const [refreshKey, setRefreshKey]   = useState(0)
+  const hasLoadedOnce                 = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -35,7 +36,10 @@ export function useBooks(): UseBooksResult {
       setError(null)
 
       try {
-        const data = await getAllBooks(currentPage, pageSize, controller.signal)
+        const data = await getAllBooks(currentPage, pageSize, {
+          signal: controller.signal,
+          sortOrder,
+        })
         setPagedData(data)
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return
@@ -52,7 +56,7 @@ export function useBooks(): UseBooksResult {
     loadBooks()
 
     return () => controller.abort()
-  }, [currentPage, pageSize, refreshKey])
+  }, [currentPage, pageSize, refreshKey, sortOrder])
 
   const refresh = useCallback(() => setRefreshKey(k => k + 1), [])
 

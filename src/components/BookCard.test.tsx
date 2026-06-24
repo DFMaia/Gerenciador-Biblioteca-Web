@@ -22,39 +22,54 @@ const baseBook: Book = {
   publisher: 'HarperCollins',
 }
 
+function renderBookCard(
+  book: Book = baseBook,
+  handlers: Partial<{
+    onUpdate: (book: Book) => void
+    onDelete: (book: Book) => void
+  }> = {},
+) {
+  const onUpdate = handlers.onUpdate ?? vi.fn()
+  const onDelete = handlers.onDelete ?? vi.fn()
+
+  render(<BookCard book={book} onUpdate={onUpdate} onDelete={onDelete} />)
+
+  return { onUpdate, onDelete }
+}
+
 describe('BookCard', () => {
   // -------------------------------------------------------------------------
   // Conteúdo textual
   // -------------------------------------------------------------------------
 
   it('deve exibir título e autor do livro', () => {
-    render(<BookCard book={baseBook} onClick={vi.fn()} />)
+    renderBookCard()
 
     expect(screen.getByText('O Senhor dos Anéis')).toBeInTheDocument()
     expect(screen.getByText('J. R. R. Tolkien')).toBeInTheDocument()
   })
 
   it('deve exibir ano de publicação quando informado', () => {
-    render(<BookCard book={baseBook} onClick={vi.fn()} />)
+    renderBookCard()
 
     expect(screen.getByText('2001')).toBeInTheDocument()
   })
 
   it('não deve exibir ano de publicação quando ausente', () => {
     const book: Book = { ...baseBook, publishedYear: null }
-    render(<BookCard book={book} onClick={vi.fn()} />)
+    renderBookCard(book)
 
     expect(screen.queryByText('2001')).not.toBeInTheDocument()
   })
 
   it('deve exibir editora quando informada', () => {
-    render(<BookCard book={baseBook} onClick={vi.fn()} />)
+    renderBookCard()
 
     expect(screen.getByText('HarperCollins')).toBeInTheDocument()
   })
 
   it('deve exibir a nota do livro quando informada', () => {
-    render(<BookCard book={baseBook} onClick={vi.fn()} />)
+    renderBookCard()
 
     expect(screen.getByText('5 / 5')).toBeInTheDocument()
   })
@@ -64,27 +79,27 @@ describe('BookCard', () => {
   // -------------------------------------------------------------------------
 
   it('deve exibir badge "Lendo" para status LENDO', () => {
-    render(<BookCard book={{ ...baseBook, status: 'LENDO' }} onClick={vi.fn()} />)
+    renderBookCard({ ...baseBook, status: 'LENDO' })
     expect(screen.getByText('Lendo')).toBeInTheDocument()
   })
 
   it('deve exibir badge "Lido" para status LIDO', () => {
-    render(<BookCard book={{ ...baseBook, status: 'LIDO' }} onClick={vi.fn()} />)
+    renderBookCard({ ...baseBook, status: 'LIDO' })
     expect(screen.getByText('Lido')).toBeInTheDocument()
   })
 
   it('deve exibir badge "Não lido" para status NAO_LIDO', () => {
-    render(<BookCard book={{ ...baseBook, status: 'NAO_LIDO' }} onClick={vi.fn()} />)
+    renderBookCard({ ...baseBook, status: 'NAO_LIDO' })
     expect(screen.getByText('Não lido')).toBeInTheDocument()
   })
 
   it('deve exibir badge "Abandonado" para status ABANDONADO', () => {
-    render(<BookCard book={{ ...baseBook, status: 'ABANDONADO' }} onClick={vi.fn()} />)
+    renderBookCard({ ...baseBook, status: 'ABANDONADO' })
     expect(screen.getByText('Abandonado')).toBeInTheDocument()
   })
 
   it('não deve exibir badge quando status é nulo', () => {
-    render(<BookCard book={{ ...baseBook, status: null }} onClick={vi.fn()} />)
+    renderBookCard({ ...baseBook, status: null })
 
     expect(screen.queryByText('Lendo')).not.toBeInTheDocument()
     expect(screen.queryByText('Lido')).not.toBeInTheDocument()
@@ -97,7 +112,7 @@ describe('BookCard', () => {
   // -------------------------------------------------------------------------
 
   it('deve exibir iniciais quando não há URL de capa', () => {
-    render(<BookCard book={{ ...baseBook, coverUrl: null }} onClick={vi.fn()} />)
+    renderBookCard({ ...baseBook, coverUrl: null })
 
     // "O Senhor dos Anéis" → primeiras duas palavras → "O" + "S" → "OS"
     expect(screen.getByText('OS')).toBeInTheDocument()
@@ -105,7 +120,7 @@ describe('BookCard', () => {
 
   it('deve exibir imagem quando coverUrl está presente', () => {
     const book: Book = { ...baseBook, coverUrl: 'https://example.com/cover.jpg' }
-    render(<BookCard book={book} onClick={vi.fn()} />)
+    renderBookCard(book)
 
     const img = screen.getByRole('img', { name: /Capa de O Senhor dos Anéis/i })
     expect(img).toHaveAttribute('src', 'https://example.com/cover.jpg')
@@ -113,7 +128,7 @@ describe('BookCard', () => {
 
   it('não deve exibir iniciais quando coverUrl está presente', () => {
     const book: Book = { ...baseBook, coverUrl: 'https://example.com/cover.jpg' }
-    render(<BookCard book={book} onClick={vi.fn()} />)
+    renderBookCard(book)
 
     expect(screen.queryByText('OS')).not.toBeInTheDocument()
   })
@@ -123,41 +138,41 @@ describe('BookCard', () => {
   // -------------------------------------------------------------------------
 
   it('deve exibir barra de progresso quando totalPages e currentPage estão definidos', () => {
-    render(<BookCard book={baseBook} onClick={vi.fn()} />)
+    renderBookCard()
 
     expect(screen.getByText('Progresso')).toBeInTheDocument()
   })
 
   it('deve calcular a porcentagem de progresso corretamente', () => {
     // 200 / 576 = 34.72... → 35%
-    render(<BookCard book={baseBook} onClick={vi.fn()} />)
+    renderBookCard()
 
     expect(screen.getByText('35%')).toBeInTheDocument()
   })
 
   it('deve limitar o progresso em 100% mesmo quando currentPage > totalPages', () => {
     const book: Book = { ...baseBook, currentPage: 1000, totalPages: 576 }
-    render(<BookCard book={book} onClick={vi.fn()} />)
+    renderBookCard(book)
 
     expect(screen.getByText('100%')).toBeInTheDocument()
   })
 
   it('não deve exibir barra de progresso quando totalPages é nulo', () => {
     const book: Book = { ...baseBook, totalPages: null, currentPage: null }
-    render(<BookCard book={book} onClick={vi.fn()} />)
+    renderBookCard(book)
 
     expect(screen.queryByText('Progresso')).not.toBeInTheDocument()
   })
 
   it('não deve exibir barra de progresso quando totalPages é zero', () => {
     const book: Book = { ...baseBook, totalPages: 0 }
-    render(<BookCard book={book} onClick={vi.fn()} />)
+    renderBookCard(book)
 
     expect(screen.queryByText('Progresso')).not.toBeInTheDocument()
   })
 
   it('deve exibir total de páginas formatado', () => {
-    render(<BookCard book={baseBook} onClick={vi.fn()} />)
+    renderBookCard()
 
     expect(screen.getByText('576 no total')).toBeInTheDocument()
   })
@@ -166,15 +181,27 @@ describe('BookCard', () => {
   // Interação
   // -------------------------------------------------------------------------
 
-  it('deve chamar onClick com o livro ao clicar no card', async () => {
-    const mockOnClick = vi.fn()
+  it('deve chamar onUpdate com o livro ao clicar em Atualizar', async () => {
+    const mockOnUpdate = vi.fn()
     const user = userEvent.setup()
 
-    render(<BookCard book={baseBook} onClick={mockOnClick} />)
+    renderBookCard(baseBook, { onUpdate: mockOnUpdate })
 
-    await user.click(screen.getByRole('article'))
+    await user.click(screen.getByRole('button', { name: 'Atualizar' }))
 
-    expect(mockOnClick).toHaveBeenCalledOnce()
-    expect(mockOnClick).toHaveBeenCalledWith(baseBook)
+    expect(mockOnUpdate).toHaveBeenCalledOnce()
+    expect(mockOnUpdate).toHaveBeenCalledWith(baseBook)
+  })
+
+  it('deve chamar onDelete com o livro ao clicar em Apagar', async () => {
+    const mockOnDelete = vi.fn()
+    const user = userEvent.setup()
+
+    renderBookCard(baseBook, { onDelete: mockOnDelete })
+
+    await user.click(screen.getByRole('button', { name: 'Apagar' }))
+
+    expect(mockOnDelete).toHaveBeenCalledOnce()
+    expect(mockOnDelete).toHaveBeenCalledWith(baseBook)
   })
 })

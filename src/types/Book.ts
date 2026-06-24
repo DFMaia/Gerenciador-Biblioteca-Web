@@ -16,6 +16,7 @@ export interface Book {
   status: ReadingStatus | null
   bookRating: number | null
   publisher: string | null
+  updatedAt?: string | null
 }
 
 export interface BookUpdateRequest {

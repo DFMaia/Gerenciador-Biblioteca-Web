@@ -11,10 +11,11 @@ const numberFormatter = new Intl.NumberFormat('pt-BR')
 
 interface BookCardProps {
   book: Book
-  onClick: (book: Book) => void
+  onUpdate: (book: Book) => void
+  onDelete: (book: Book) => void
 }
 
-export function BookCard({ book, onClick }: BookCardProps) {
+export function BookCard({ book, onUpdate, onDelete }: BookCardProps) {
   const progress =
     book.totalPages && book.totalPages > 0
       ? Math.min(100, Math.round(((book.currentPage ?? 0) / book.totalPages) * 100))
@@ -31,16 +32,35 @@ export function BookCard({ book, onClick }: BookCardProps) {
   const status = book.status ? statusConfig[book.status] : null
 
   return (
-    <article className="wa-card" onClick={() => onClick(book)}>
+    <article className="wa-card">
       <div className="wa-card-grid">
 
         {/* Capa ou placeholder com iniciais */}
-        <div className="wa-cover">
-          {book.coverUrl ? (
-            <img src={book.coverUrl} alt={`Capa de ${book.title}`} />
-          ) : (
-            <div className="wa-cover-initials">{initials}</div>
-          )}
+        <div className="wa-card-cover-column">
+          <div className="wa-cover">
+            {book.coverUrl ? (
+              <img src={book.coverUrl} alt={`Capa de ${book.title}`} />
+            ) : (
+              <div className="wa-cover-initials">{initials}</div>
+            )}
+          </div>
+
+          <div className="wa-card-actions" aria-label={`Ações para ${book.title}`}>
+            <button
+              type="button"
+              className="wa-card-action wa-card-action-update"
+              onClick={() => onUpdate(book)}
+            >
+              Atualizar
+            </button>
+            <button
+              type="button"
+              className="wa-card-action wa-card-action-delete"
+              onClick={() => onDelete(book)}
+            >
+              Apagar
+            </button>
+          </div>
         </div>
 
         {/* Corpo do card */}

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { searchBooks, updateBook } from '../api/booksApi'
 import { GENRES, label } from '../constants/bookOptions'
 import type { Book, BookUpdateRequest, ReadingStatus } from '../types/Book'
@@ -13,6 +14,7 @@ const STATUS_OPTIONS: { value: ReadingStatus; label: string }[] = [
 ]
 
 const SUCCESS_ANIMATION_MS = 1300
+const SEARCH_PLACEHOLDER = 'Título, autor, editora, ISBN ou gênero'
 
 type SaveState = 'idle' | 'saving' | 'saved'
 
@@ -33,7 +35,8 @@ interface BookForm {
 
 interface LibrarySearchViewProps {
   onBack: () => void
-  onSaved: () => void
+  onSaved: (book: Book) => void
+  initialBook?: Book | null
 }
 
 function toForm(book: Book): BookForm {
@@ -139,21 +142,75 @@ function SaveSuccessIcon() {
   )
 }
 
-export function LibrarySearchView({ onBack, onSaved }: LibrarySearchViewProps) {
+export function LibrarySearchView({ onBack, onSaved, initialBook = null }: LibrarySearchViewProps) {
+  const isDirectEdit = initialBook != null
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Book[]>([])
-  const [selectedBook, setSelectedBook] = useState<Book | null>(null)
-  const [form, setForm] = useState<BookForm | null>(null)
+  const [selectedBook, setSelectedBook] = useState<Book | null>(initialBook)
+  const [form, setForm] = useState<BookForm | null>(() => initialBook ? toForm(initialBook) : null)
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [placeholderSize, setPlaceholderSize] = useState<number | null>(null)
 
   const trimmedQuery = query.trim()
   const isAbandoned = form?.status === 'ABANDONADO'
   const progress = useMemo(() => (form ? getProgress(form) : 0), [form])
 
+  useLayoutEffect(() => {
+    if (isDirectEdit) return
+
+    const inputElement = searchInputRef.current
+    if (!inputElement) return
+
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')
+
+    function updatePlaceholderSize(target: HTMLInputElement) {
+      const inputWidth = target.clientWidth
+      if (inputWidth <= 0) return
+
+      const styles = window.getComputedStyle(target)
+      const maxSize = Number.parseFloat(styles.fontSize) || 72
+      const minSize = 12
+
+      let placeholderWidth = SEARCH_PLACEHOLDER.length * maxSize * 0.52
+      if (context) {
+        context.font = `${maxSize}px ${styles.fontFamily}`
+        placeholderWidth = context.measureText(SEARCH_PLACEHOLDER).width
+      }
+
+      const nextSize = Math.max(
+        minSize,
+        Math.min(maxSize, Math.floor((inputWidth / Math.max(placeholderWidth, 1)) * maxSize * 0.96)),
+      )
+
+      setPlaceholderSize(nextSize)
+    }
+
+    const handleResize = () => updatePlaceholderSize(inputElement)
+
+    handleResize()
+
+    const resizeObserver = new ResizeObserver(handleResize)
+    resizeObserver.observe(inputElement)
+    window.addEventListener('resize', handleResize)
+
+    return () => {
+      resizeObserver.disconnect()
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [isDirectEdit])
+
   useEffect(() => {
+    if (isDirectEdit) {
+      setSearching(false)
+      setSearchError(null)
+      return
+    }
+
     if (trimmedQuery === '') {
       setResults([])
       setSearching(false)
@@ -189,7 +246,18 @@ export function LibrarySearchView({ onBack, onSaved }: LibrarySearchViewProps) {
       window.clearTimeout(timeoutId)
       controller.abort()
     }
-  }, [trimmedQuery])
+  }, [isDirectEdit, trimmedQuery])
+
+  useEffect(() => {
+    if (!initialBook) return
+    setQuery('')
+    setResults([])
+    setSelectedBook(initialBook)
+    setForm(toForm(initialBook))
+    setSearchError(null)
+    setSaveError(null)
+    setSaveState('idle')
+  }, [initialBook])
 
   useEffect(() => {
     if (saveState !== 'saved') return
@@ -233,85 +301,98 @@ export function LibrarySearchView({ onBack, onSaved }: LibrarySearchViewProps) {
       setForm(toForm(saved))
       setResults(prev => prev.map(book => book.id === saved.id ? saved : book))
       setSaveState('saved')
-      onSaved()
+      onSaved(saved)
     } catch (err) {
       setSaveState('idle')
       setSaveError(err instanceof Error ? err.message : 'Não foi possível salvar.')
     }
   }
 
-  const resultStatus = trimmedQuery !== '' && !searching && results.length === 0
-  const showEditorLoader = trimmedQuery !== '' && !selectedBook
+  const resultStatus = !isDirectEdit && trimmedQuery !== '' && !searching && results.length === 0
+  const showEditorLoader = !isDirectEdit && trimmedQuery !== '' && !selectedBook
   const isDirty = selectedBook && form ? !isSameForm(form, toForm(selectedBook)) : false
   const showSaveButton = isDirty || saveState === 'saving' || saveState === 'saved'
   const coverUrl = form?.coverUrl.trim()
+  const searchInputStyle = placeholderSize
+    ? ({ '--library-search-placeholder-size': `${placeholderSize}px` } as CSSProperties)
+    : undefined
 
   return (
     <main className="wa-main wa-library-search-main">
       <section className="wa-library-search">
-        <div className="wa-library-search-top">
-          <button className="wa-library-back" onClick={onBack} aria-label="Voltar para a home">
+        <div className={`wa-library-search-top ${isDirectEdit ? 'is-direct-edit' : ''}`}>
+          <button
+            className="wa-library-back"
+            onClick={onBack}
+            aria-label={isDirectEdit ? 'Voltar para a lista' : 'Voltar para a home'}
+          >
             <span aria-hidden="true">‹</span>
           </button>
 
-          <div className="wa-library-search-field">
-            <label className="wa-label" htmlFor="library-search-input">Pesquisar no acervo</label>
-            <input
-              id="library-search-input"
-              className="wa-library-search-input"
-              value={query}
-              onChange={handleQueryChange}
-              placeholder="Título, autor, editora, ISBN ou gênero"
-              autoFocus
-            />
-          </div>
+          {!isDirectEdit && (
+            <div className="wa-library-search-field">
+              <label className="wa-label" htmlFor="library-search-input">Pesquisar no acervo</label>
+              <input
+                ref={searchInputRef}
+                id="library-search-input"
+                className="wa-library-search-input"
+                value={query}
+                onChange={handleQueryChange}
+                placeholder={SEARCH_PLACEHOLDER}
+                style={searchInputStyle}
+                autoFocus
+              />
+            </div>
+          )}
         </div>
 
-        <div className="wa-library-search-content">
-          <aside className="wa-library-results">
-            {trimmedQuery === '' && (
-              <div className="wa-library-empty-panel">
-                <p className="wa-eyebrow">Acervo</p>
-              </div>
-            )}
+        <div className={`wa-library-search-content ${isDirectEdit ? 'is-editor-only' : ''}`}>
+          {!isDirectEdit && (
+            <aside className="wa-library-results">
+              {trimmedQuery === '' && (
+                <div className="wa-library-empty-panel">
+                  <p className="wa-eyebrow">Acervo</p>
+                </div>
+              )}
 
-            {searchError && (
-              <div className="wa-form-error">{searchError}</div>
-            )}
+              {searchError && (
+                <div className="wa-form-error">{searchError}</div>
+              )}
 
-            {resultStatus && !searchError && (
-              <div className="wa-library-empty-panel">
-                <p className="wa-label">Nenhum livro encontrado</p>
-              </div>
-            )}
+              {resultStatus && !searchError && (
+                <div className="wa-library-empty-panel">
+                  <p className="wa-label">Nenhum livro encontrado</p>
+                </div>
+              )}
 
-            {!searching && results.length > 0 && (
-              <div className="wa-library-result-list">
-                {results.map(book => (
-                  <button
-                    key={book.id}
-                    className={`wa-library-result ${selectedBook?.id === book.id ? 'is-selected' : ''}`}
-                    onClick={() => handleSelectBook(book)}
-                  >
-                    <span className="wa-library-result-cover">
-                      {book.coverUrl ? (
-                        <img src={book.coverUrl} alt={`Capa de ${book.title}`} />
-                      ) : (
-                        <span>{getInitials(book.title) || '?'}</span>
-                      )}
-                    </span>
-                    <span className="wa-library-result-body">
-                      <span className="wa-library-result-title">{book.title}</span>
-                      <span className="wa-library-result-author">{book.author}</span>
-                      <span className="wa-library-result-meta">
-                        {[book.publisher, book.publishedYear].filter(Boolean).join(' · ') || 'Sem editora'}
+              {!searching && results.length > 0 && (
+                <div className="wa-library-result-list">
+                  {results.map(book => (
+                    <button
+                      key={book.id}
+                      className={`wa-library-result ${selectedBook?.id === book.id ? 'is-selected' : ''}`}
+                      onClick={() => handleSelectBook(book)}
+                    >
+                      <span className="wa-library-result-cover">
+                        {book.coverUrl ? (
+                          <img src={book.coverUrl} alt={`Capa de ${book.title}`} />
+                        ) : (
+                          <span>{getInitials(book.title) || '?'}</span>
+                        )}
                       </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </aside>
+                      <span className="wa-library-result-body">
+                        <span className="wa-library-result-title">{book.title}</span>
+                        <span className="wa-library-result-author">{book.author}</span>
+                        <span className="wa-library-result-meta">
+                          {[book.publisher, book.publishedYear].filter(Boolean).join(' · ') || 'Sem editora'}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </aside>
+          )}
 
           <section className="wa-library-editor">
             {!selectedBook || !form ? (
@@ -338,7 +419,13 @@ export function LibrarySearchView({ onBack, onSaved }: LibrarySearchViewProps) {
                       disabled={saveState === 'saving' || saveState === 'saved'}
                       aria-live="polite"
                     >
-                      {saveState === 'saved' ? <SaveSuccessIcon /> : <span>{saveState === 'saving' ? 'Salvando...' : 'Salvar'}</span>}
+                      {saveState === 'saved' ? (
+                        <SaveSuccessIcon />
+                      ) : (
+                        <span className="wa-library-save-label">
+                          {saveState === 'saving' ? 'Salvando...' : 'Salvar'}
+                        </span>
+                      )}
                     </button>
                   )}
                 </div>

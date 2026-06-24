@@ -1,5 +1,5 @@
 BANK-MEMORY — Gerenciador de Biblioteca Web
-Última atualização: 25/04/2026
+Última atualização: 27/04/2026
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 INSTRUÇÃO PARA A IA — LEIA ANTES DE QUALQUER RESPOSTA
@@ -136,14 +136,16 @@ CONEXÃO COM O BACKEND
 * Proxy Vite: /api/* → http://localhost:8080/*
 * Backend precisa estar rodando antes do web
 * Endpoints consumidos:
-  - GET /books?page=...&size=... → booksApi.ts → getAllBooks() (lista paginada + metrics globais)
+  - GET /books?page=...&size=...&sortOrder=...&status=... → booksApi.ts → getAllBooks()
+    (lista paginada/filtrada + metrics globais)
   - GET /books/search?query=... → booksApi.ts → searchBooks() (pesquisa livros já salvos no banco)
   - PATCH /books/{id} → booksApi.ts → updateBook() (edita campos do Book, exceto título/autor)
+  - DELETE /books/{id} → booksApi.ts → deleteBook() (apaga livro do acervo e atualiza listas)
   - POST /editions → editionsApi.ts → saveEdition()
   - GET /google-books/search → googleBooksApi.ts → searchGoogleBooks()
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ESTRUTURA DE ARQUIVOS ATUAL (estado real em 25/04/2026)
+ESTRUTURA DE ARQUIVOS ATUAL (estado real em 27/04/2026)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ```
@@ -159,14 +161,15 @@ Gerenciador-Biblioteca-Web/
 │   ├── App.css              ← vazio (sem uso)
 │   ├── index.css            ← Wabi Paper completo: tokens 3 temas + .wa-* + modal/form/search
 │   ├── api/
-│   │   ├── booksApi.ts      ← getAllBooks, searchBooks, updateBook
+│   │   ├── booksApi.ts      ← getAllBooks, searchBooks, updateBook, deleteBook
 │   │   ├── editionsApi.ts   ← saveEdition(dto) → POST /api/editions
 │   │   └── googleBooksApi.ts← searchGoogleBooks() → GET /api/google-books/search
 │   ├── components/
-│   │   ├── BookCard.tsx     ← card clicável, Wabi Paper
-│   │   ├── DetailSheet.tsx  ← painel slide-in da direita ao clicar num card
+│   │   ├── BookCard.tsx     ← card Wabi Paper com ações Atualizar/Apagar no hover
+│   │   ├── DetailSheet.tsx  ← legado: painel lateral não usado no fluxo atual da home
 │   │   ├── LibrarySearchView.tsx ← tela "Pesquisar" para editar livros salvos no banco
-│   │   └── NewBookModal.tsx ← modal centralizado "+ Novo livro" + Google Books + preview capa
+│   │   ├── NewBookModal.tsx ← modal centralizado "+ Novo livro" + Google Books + preview capa
+│   │   └── StatisticsView.tsx ← página de estatísticas do acervo + lista por ano
 │   ├── constants/
 │   │   └── bookOptions.ts   ← GENRES, EDITION_FORMATS e label()
 │   ├── hooks/
@@ -222,32 +225,98 @@ VARIÁVEIS CSS PRINCIPAIS (todas em :root ou [data-theme="X"])
 --ease: cubic-bezier(.22,.61,.36,1)
 
 CLASSES .wa-* EXISTENTES (em index.css)
-Text roles: .wa-eyebrow .wa-label .wa-meta .wa-num .wa-mono .wa-body-2 .wa-body-3
-Rules: .wa-rule .wa-rule-ink
-Layout: .wa-app .wa-main
-Header: .wa-header .wa-header-inner .wa-header-title .wa-header-right
-Theme switch: .wa-theme-switch .wa-theme-chip (.is-active)
-Buttons: .wa-btn .wa-btn-secondary .wa-btn-primary .wa-btn-seal
-Hero: .wa-hero .wa-hero-head .wa-hero-title .wa-metrics .wa-metric .wa-metric-num .wa-metric-sub
-Collection: .wa-collection .wa-collection-head .wa-collection-title
-Grid: .wa-grid
-Card: .wa-card .wa-card-grid .wa-cover .wa-cover-initials .wa-card-top .wa-pill
-      .wa-card-year .wa-card-title .wa-card-author .wa-card-tags
-Progress: .wa-progress .wa-progress-head .wa-progress-track .wa-progress-fill .wa-progress-foot
-States: .wa-state .wa-state-title .wa-state-sub .wa-state-error
-Sheet: .wa-sheet-backdrop .wa-sheet .wa-sheet-head .wa-sheet-close .wa-sheet-title
-       .wa-sheet-author .wa-sheet-dl .wa-sheet-desc
-Modal (NOVO): .wa-modal-backdrop .wa-modal .wa-modal-head .wa-modal-title .wa-modal-body
-Success state (NOVO s4): .wa-modal-success-shell .wa-modal-success .wa-success-mark
-      .wa-success-icon .wa-success-ring .wa-success-circle .wa-success-check
-      .wa-success-title .wa-success-sub
-Choice cards (NOVO): .wa-choice-grid .wa-choice-card (.is-active .is-disabled)
-              .wa-choice-card-title .wa-choice-card-sub
-Form reveal (NOVO): .wa-form-reveal (.is-open) .wa-form-reveal-inner
-Form (NOVO): .wa-form .wa-form-section-title .wa-form-group .wa-form-label .wa-form-req
-             .wa-form-input .wa-form-select .wa-form-textarea
-             .wa-form-row .wa-form-row-3 .wa-form-actions .wa-form-error
-Footer: .wa-footer .wa-footer-row
+Base textual:
+  .wa-eyebrow .wa-label .wa-meta .wa-num .wa-mono .wa-body-2 .wa-body-3
+Regras/linhas:
+  .wa-rule .wa-rule-ink
+  As linhas minimalistas usam `--rule`/`--ink-faint`. Evitar escalar o elemento que
+  tem borda, porque isso cria variação visual de espessura.
+Layout geral:
+  .wa-app .wa-main
+Header:
+  .wa-header .wa-header-inner .wa-header-title .wa-header-right
+Tema e ordenação:
+  .wa-theme-switch .wa-theme-chip (.is-active)
+  SortSwitcher reutiliza .wa-theme-chip para Crescente / Decrescente / Aleatório.
+Botões:
+  .wa-btn .wa-btn-secondary .wa-btn-primary .wa-btn-seal
+Hero/home:
+  .wa-hero .wa-hero-head .wa-hero-title
+  .wa-metrics .wa-metric .wa-metric-clickable .wa-metric-num .wa-metric-sub
+  .wa-hero-metrics-rule
+  .wa-recommendation-metric .wa-recommendation-symbol
+  .wa-statistics-metric .wa-statistics-chart .wa-statistics-axis
+  .wa-statistics-bar .wa-statistics-line
+Coleção/grid:
+  .wa-collection .wa-collection-head .wa-collection-title
+  .wa-grid
+Card:
+  .wa-card .wa-card-grid .wa-card-cover-column
+  .wa-cover .wa-cover-initials .wa-card-actions
+  .wa-card-action .wa-card-action-update .wa-card-action-delete
+  .wa-card-top .wa-pill .wa-card-year .wa-card-title .wa-card-author .wa-card-tags
+  Importante: hover aumenta apenas .wa-card-grid/conteúdo; a borda do .wa-card fica
+  estável para preservar linhas internas com 1px uniforme.
+Progresso:
+  .wa-progress .wa-progress-head .wa-progress-track .wa-progress-fill .wa-progress-foot
+  A barra atual usa verde e tende ao verde militar conforme o avanço. Evitar gradiente
+  esticado fixo; a sensação desejada é a barra crescendo e a cor acompanhando o progresso.
+Estados:
+  .wa-state .wa-state-title .wa-state-sub .wa-state-error
+Paginação:
+  .wa-pagination .wa-pagination-info .wa-pagination-controls .wa-pagination-size
+  .wa-pagination-chip .wa-pagination-nav .wa-pagination-btn
+Fluxos por status:
+  .wa-reading-page-main .wa-reading-page .wa-reading-page-top
+  .wa-reading-page-title .wa-reading-page-head
+Sheet legado:
+  .wa-sheet-backdrop .wa-sheet .wa-sheet-head .wa-sheet-close .wa-sheet-title
+  .wa-sheet-author .wa-sheet-dl .wa-sheet-desc
+  O arquivo DetailSheet existe, mas não deve ser usado pela home no fluxo atual.
+Modal de novo livro:
+  .wa-modal-backdrop .wa-modal .wa-modal-head .wa-modal-title .wa-modal-body
+  .wa-choice-grid .wa-choice-card (.is-active .is-disabled)
+  .wa-choice-card-title .wa-choice-card-sub
+  .wa-form-reveal (.is-open) .wa-form-reveal-inner
+  .wa-form .wa-form-section-title .wa-form-group .wa-form-label .wa-form-req
+  .wa-form-input .wa-form-select .wa-form-textarea
+  .wa-form-row .wa-form-row-3 .wa-form-actions .wa-form-error
+Sucesso de cadastro/salvamento:
+  .wa-modal-success-shell .wa-modal-success .wa-success-mark
+  .wa-success-icon .wa-success-ring .wa-success-circle .wa-success-check
+  .wa-success-title .wa-success-sub
+Pesquisa/edição no acervo:
+  .wa-library-search-main .wa-library-search .wa-library-search-top
+  .wa-library-back .wa-library-search-field .wa-library-search-input
+  .wa-library-search-content .wa-library-results .wa-library-result*
+  .wa-library-editor-empty .wa-library-book-expanded .wa-library-cover-large
+  .wa-library-cover-save .wa-library-save-label .wa-library-progress*
+  .wa-library-form .wa-library-locked-input .wa-open-book-loader
+  .wa-open-book .wa-open-book-page*
+Recomendação:
+  .wa-recommendation-backdrop .wa-recommendation-dialog .wa-recommendation-close
+  .wa-recommendation-title .wa-recommendation-state .wa-recommendation-card
+  .wa-recommendation-cover-column .wa-recommendation-cover
+  .wa-recommendation-read-action .wa-recommendation-body
+  .wa-recommendation-book-title .wa-recommendation-author
+  .wa-recommendation-success .wa-recommendation-actions
+Exclusão:
+  .wa-delete-backdrop .wa-delete-dialog .wa-delete-success-card
+  .wa-delete-title .wa-delete-copy .wa-delete-error .wa-delete-actions-row
+  .wa-delete-btn .wa-delete-btn-ghost .wa-delete-btn-danger
+  .wa-delete-success-mark .wa-delete-success-icon .wa-delete-success-ring
+  .wa-delete-success-circle .wa-delete-success-x
+Estatísticas:
+  .wa-stats-page-main .wa-stats-page .wa-year-carousel .wa-year-chip
+  .wa-stat-grid .wa-stat-tile .wa-stat-number .wa-stat-sub
+  .wa-stat-feature-grid .wa-stat-panel .wa-stat-panel-large
+  .wa-stat-panel-clickable .wa-stat-panel-title
+  .wa-horseshoe .wa-horseshoe-svg .wa-horseshoe-track
+  .wa-horseshoe-fill .wa-horseshoe-center
+  .wa-segmented .wa-segmented-svg .wa-segmented-fill
+  .wa-stat-genre-grid .wa-genre-list .wa-genre-row .wa-genre-dot
+Footer:
+  .wa-footer .wa-footer-row
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 src/types/Book.ts — conteúdo atual
@@ -272,6 +341,7 @@ export interface Book {
   status: ReadingStatus | null
   bookRating: number | null
   publisher: string | null
+  updatedAt?: string | null
 }
 
 export interface BookUpdateRequest {
@@ -310,6 +380,15 @@ export interface PagedBooks {
 }
 ```
 
+Observações importantes:
+* `updatedAt` é opcional porque depende do backend retornar esse campo.
+* `updatedAt` é usado pela página de estatísticas para inferir o ano em que o livro
+  entrou/foi atualizado no acervo. Como ainda não existe `createdAt`, essa inferência
+  não é uma data perfeita de entrada no acervo.
+* `BookMetrics` vem do backend junto com a paginação e deve ser usado para números
+  globais da home. Não calcular "Lidos", "Lendo", "Abandonados" ou "Páginas" só a
+  partir dos cards visíveis da página atual.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 src/types/Edition.ts — conteúdo completo (NOVO 21/04/2026 s2)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -339,8 +418,10 @@ export interface EditionRequest {
 src/api/booksApi.ts — funções atuais
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-* getAllBooks(page, size, signal?) → GET /api/books?page=...&size=...
+* getAllBooks(page, size, optionsOrSignal?) → GET /api/books?page=...&size=...
   - Retorna PagedBooks, não mais Book[] puro.
+  - Aceita `signal`, `sortOrder` e `status`.
+  - Também preserva compatibilidade com a assinatura antiga recebendo só AbortSignal.
   - Mensagem de erro: "Nao foi possivel carregar os livros."
 * searchBooks(query, signal?) → GET /api/books/search?query=...
   - Pesquisa somente livros já salvos no banco.
@@ -349,6 +430,10 @@ src/api/booksApi.ts — funções atuais
   - Envia BookUpdateRequest em JSON.
   - Atualiza dados editáveis do Book sem permitir alterar título/autor.
   - Se o backend retornar JSON com `message`, reaproveita essa mensagem.
+* deleteBook(bookId) → DELETE /api/books/{id}
+  - Usado pelos botões "Apagar" dos cards da home/listas por status.
+  - Se o backend retornar JSON com `message`, reaproveita essa mensagem.
+  - Erro padrão: "Não foi possível apagar o livro."
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 src/api/editionsApi.ts — conteúdo completo (NOVO 21/04/2026 s2)
@@ -392,40 +477,124 @@ src/pages/BookList.tsx — estrutura completa
 
 Importações:
   useEffect, useState (react)
-  BookCard, DetailSheet, LibrarySearchView, NewBookModal (components)
+  BookCard, LibrarySearchView, NewBookModal, StatisticsView (components)
   useBooks (hooks)
-  Book (types)
+  deleteBook, getAllBooks, updateBook (api/booksApi)
+  getPreferences, saveTheme, saveSortOrder (api/preferencesApi)
+  Book, BookMetrics, BookUpdateRequest, ReadingStatus (types)
+  Theme, SortOrder (types/preferences)
+
+Tipos locais:
+  StatusFlow = 'reading' | 'abandoned'
+  ViewMode = 'home' | 'search' | 'status-list' | 'status-edit' | 'stats'
+  EditReturnView = 'home' | 'status-list' | 'stats'
+  DeleteDialogState = 'confirming' | 'deleting' | 'deleted' | null
+  RecommendationState = 'idle' | 'loading' | 'ready' | 'saving' | 'selected' | 'empty' | 'error'
 
 Componentes inline (definidos no mesmo arquivo):
   ThemeSwitcher({ theme, setTheme }) — 3 chips: Kinari / Sumi / Sépia
-  Hero({ books }) — métricas: Acervo, Lendo, Lidos, Páginas
-  Metric({ label, value, sub }) — bloco de métrica individual
+  SortSwitcher({ sortOrder, setSortOrder }) — Crescente ↑ / Decrescente ↓ / Aleatório
+  StatusBooksPage — lista filtrada por LENDO ou ABANDONADO
+  DeleteBookDialog — confirmação de exclusão + animação vermelha círculo/X
+  RecommendationDialog — modal "Me indique um livro" para livros NAO_LIDO aleatórios
+  Hero — métricas: Acervo, Lendo, Lidos, Abandonados, Páginas, Me indique um livro, Estatísticas
+  Metric({ label, value, sub, onClick }) — bloco de métrica individual
+  RecommendationMetric — bloco clicável "Me indique um livro"
+  StatisticsMetric — gráfico SVG minimalista no bloco Estatísticas
+  Pagination — paginação com 20 / 50 / 100 / Tudo
+
+Helpers locais:
+  toBookUpdateRequest(book, overrides)
+    - transforma Book em BookUpdateRequest.
+    - usado principalmente para mudar livro indicado de NAO_LIDO para LENDO sem perder
+      os outros campos editáveis.
+  getInitials(title)
+    - gera placeholder de capa para RecommendationDialog.
+  STATUS_FLOW_CONTENT
+    - centraliza textos/status de `reading` e `abandoned`.
 
 Estado em BookList:
   books, pagedData, isLoading, isRefreshing, error, currentPage, pageSize, totalPages, refresh,
-  goToPage, setPageSize ← useBooks()
-  selectedBook: Book | null       ← abre/fecha DetailSheet
+  goToPage, setPageSize ← useBooks(sortOrder)
   showNewBook: boolean            ← abre/fecha NewBookModal
-  view: 'home' | 'search'         ← alterna home e tela de pesquisa/edição
-  theme: 'kinari'|'sumi'|'sepia' ← persistido em localStorage 'wabi-theme'
+  editingBook: Book | null        ← livro aberto no fluxo de edição direta
+  editReturnView: 'home'|'status-list'|'stats' ← para onde a seta volta após edição
+  statusFlow: 'reading'|'abandoned'    ← lista por status ativa
+  statusRefreshKey: number        ← força recarga de status/stats após salvar/apagar/indicar
+  deleteTarget: Book | null       ← livro aguardando confirmação de exclusão
+  deleteState: 'confirming'|'deleting'|'deleted'|null
+  deleteError: string|null
+  recommendationOpen: boolean
+  recommendedBook: Book | null
+  recommendationState: RecommendationState
+  recommendationError: string|null
+  view: 'home' | 'search' | 'status-list' | 'status-edit' | 'stats'
+  theme: 'kinari'|'sumi'|'sepia' ← persistido em localStorage e backend via preferences
+
+Preferências:
+  - Ao montar, chama `getPreferences()`.
+  - Tema inválido cai para `kinari`.
+  - Se o backend falhar, usa localStorage como fallback para tema.
+  - `handleSetTheme` salva no estado, aplica no `<html>`, persiste em localStorage e tenta
+    salvar no backend com `saveTheme`.
+  - `handleSetSortOrder` salva no backend com `saveSortOrder`.
+  - Se clicar em `Aleatório` enquanto `RANDOM` já está ativo, força `refresh()` e incrementa
+    `statusRefreshKey`, porque o usuário espera uma nova lista aleatória a cada clique.
 
 Header:
   - Eyebrow: "Biblioteca pessoal"
   - Título h1: "Gerenciador de Biblioteca"
   - ThemeSwitcher chips
-  - Botão "Pesquisar" (wa-btn-secondary) — muda view para 'search'
-  - Botão "+ Novo livro" (wa-btn-primary) — onClick={() => setShowNewBook(true)}
+  - Botão "Pesquisar no seu acervo" (wa-btn-secondary) — muda view para 'search'
+  - Botão "Novo livro" (wa-btn-primary) — onClick={() => setShowNewBook(true)}
 
 Hero:
   - Eyebrow: "Laboratório de design"
   - Título h2: "Sua biblioteca" (fonte enorme clamp 72px-144px)
-  - 4 métricas em grid horizontal: Acervo / Lendo / Lidos / Páginas
-  - Lendo, Lidos e Páginas usam pagedData.metrics, não a lista visível de cards.
+  - 7 métricas em grid horizontal:
+    Acervo / Lendo / Lidos / Abandonados / Páginas / Me indique um livro / Estatísticas
+  - Lendo e Abandonados ficam clicáveis quando o valor é maior ou igual a 1.
+  - "Me indique um livro" sempre abre o modal de indicação usando apenas livros NAO_LIDO.
+  - "Estatísticas" abre a página `StatisticsView`.
+  - Métricas usam pagedData.metrics, não a lista visível de cards.
     Isso garante que a home reflita o banco inteiro mesmo quando a coleção está paginada.
+  - A linha superior e a linha inferior do bloco de métricas ficam desconectadas do grid
+    com o mesmo respiro visual.
 
 Coleção:
-  - Label "Livros" + h3 "Coleção atual" + count à direita
+  - Label "Livros" + h3 "Coleção atual" + ordenação + paginação/count à direita
   - Estados: loading → error → vazio → grid de BookCards
+  - Cards não abrem mais DetailSheet ao clicar.
+  - No hover/focus do card aparecem abaixo da capa:
+    "Atualizar" verde → abre LibrarySearchView em edição direta;
+    "Apagar" vermelho → abre confirmação e chama DELETE /books/{id}.
+
+Fluxo "Me indique um livro":
+  - `openRecommendation()` abre o modal e chama `loadRecommendation`.
+  - `loadRecommendation(excludeBookId?)` chama:
+    getAllBooks(0, 20, { sortOrder: 'RANDOM', status: 'NAO_LIDO' })
+  - O primeiro resultado diferente do livro atual é escolhido; se não houver, usa o primeiro.
+  - Se não vier livro, estado `empty` mostra mensagem de que não há livros não lidos.
+  - `requestAnotherRecommendation()` refaz o sorteio.
+  - `markRecommendedBookAsReading()` usa `updateBook` com `status: 'LENDO'`,
+    chama `refresh()` e incrementa `statusRefreshKey`.
+  - Ao mudar para LENDO, o modal mostra o estado `selected`.
+
+Fluxo de exclusão:
+  - `requestDelete(book)` abre `DeleteBookDialog` em `confirming`.
+  - `confirmDelete()` troca para `deleting`, chama `deleteBook(book.id)`, atualiza home/listas
+    com `refresh()` + `statusRefreshKey++` e depois troca para `deleted`.
+  - Estado `deleted` mostra alerta central com círculo vermelho e X.
+  - Um `useEffect` fecha o alerta automaticamente após 1,5s.
+  - Se a API falhar, volta para `confirming` e mostra a mensagem do backend ou fallback.
+
+Fluxos por status:
+  - `StatusBooksPage` é genérica para `reading` e `abandoned`.
+  - Usa `getAllBooks(0, 0, { sortOrder, status })` para buscar a lista completa daquele status.
+  - A seta fica à esquerda do título.
+  - Usa o mesmo `SortSwitcher`, inclusive com Aleatório reexecutável.
+  - Cards usam os mesmos botões Atualizar/Apagar da home.
+  - "Atualizar" chama `openEditor(book, 'status-list')`.
 
 Footer:
   - "蔵 · Gerenciador de Biblioteca" | "GET /books · localhost:8080"
@@ -435,8 +604,28 @@ Renderização final:
     renderiza <LibrarySearchView onBack={() => setView('home')} onSaved={refresh} />
     sem header/home, para a tela ficar limpa com seta de voltar + campo de busca.
 
+  Se view === 'status-list':
+    renderiza <StatusBooksPage /> para LENDO ou ABANDONADO e <DeleteBookDialog />.
+
+  Se view === 'stats':
+    renderiza <StatisticsView /> e <DeleteBookDialog />.
+    - onBackHome volta para home.
+    - onOpenReading define statusFlow='reading' e abre `status-list`.
+    - onOpenAbandoned define statusFlow='abandoned' e abre `status-list`.
+    - onUpdateBook abre o editor com retorno para `stats`.
+    - onDeleteBook usa o mesmo fluxo de exclusão.
+
+  Se view === 'status-edit':
+    renderiza <LibrarySearchView initialBook={editingBook} /> sem barra de busca,
+    apenas com seta para voltar à view de origem.
+    Ao salvar:
+      setEditingBook(book)
+      refresh()
+      statusRefreshKey++
+
   Se view === 'home':
-  <DetailSheet book={selectedBook} onClose={() => setSelectedBook(null)} />
+  <DeleteBookDialog />
+  <RecommendationDialog />
   <NewBookModal
     open={showNewBook}
     onClose={() => setShowNewBook(false)}
@@ -447,8 +636,10 @@ Renderização final:
 src/components/BookCard.tsx — estrutura
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Props: { book: Book, onClick: (book: Book) => void }
-Clicável — chama onClick(book) → abre DetailSheet no BookList.
+Props: { book: Book, onUpdate: (book: Book) => void, onDelete: (book: Book) => void }
+O card não é mais clicável como um todo. No hover/focus aparecem dois botões abaixo da capa:
+* Atualizar — verde, chama onUpdate(book) e abre o editor completo.
+* Apagar — vermelho, chama onDelete(book) e abre a confirmação de exclusão.
 
 statusConfig:
   NAO_LIDO  → "Não lido",   color: var(--smoke)
@@ -457,7 +648,9 @@ statusConfig:
   ABANDONADO→ "Abandonado", color: var(--ash)
 
 Layout: wa-card > wa-card-grid (grid 96px + 1fr)
-  Capa (96×136px): coverUrl ? <img> : iniciais (2 letras, display font)
+  Coluna da capa:
+    Capa (96×136px): coverUrl ? <img> : iniciais (2 letras, display font)
+    Ações no hover: Atualizar / Apagar
   Corpo:
     Topo: pill de status + ano (publishedYear)
     Título: 24px, clamp 2 linhas
@@ -468,8 +661,12 @@ Layout: wa-card > wa-card-grid (grid 96px + 1fr)
       Track 3px, fill com --gradient-progress
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-src/components/DetailSheet.tsx — estrutura
+src/components/DetailSheet.tsx — legado
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+O arquivo ainda existe no repositório, mas a home não renderiza mais o painel lateral.
+Desde 27/04/2026, o fluxo de ação do card é:
+hover no card → Atualizar/Apagar → editor completo ou confirmação de exclusão.
 
 Props: { book: Book | null, onClose: () => void }
 Retorna null se book === null.
@@ -494,9 +691,11 @@ src/components/LibrarySearchView.tsx — tela "Pesquisar" (NOVO 25/04/2026)
 Objetivo: pesquisar e atualizar livros que já existem no banco. Não usa Google Books.
 
 Entrada:
-* Props: { onBack: () => void, onSaved: () => void }
-* onBack volta para a home.
-* onSaved chama refresh() da home após salvar alterações.
+* Props: { onBack: () => void, onSaved: (book: Book) => void, initialBook?: Book | null }
+* onBack volta para a view de origem.
+* onSaved recebe o livro salvo e normalmente chama refresh() da home/lista/página de estatísticas.
+* Quando `initialBook` existe, a tela abre direto no editor daquele livro e não mostra a
+  barra superior de pesquisa.
 
 Fluxo:
 1. BookList troca view para 'search' quando o usuário clica no botão "Pesquisar".
@@ -514,6 +713,15 @@ Fluxo:
 10. Ao salvar, o botão verde "Salvar" transforma em círculo com o mesmo SVG de sucesso
     usado no modal de cadastro.
 
+Fluxo de edição direta:
+1. Home/listas/status/estatísticas chamam `openEditor(book, returnView)`.
+2. BookList renderiza `LibrarySearchView initialBook={editingBook}`.
+3. A tela mostra apenas seta de voltar + ficha do livro, sem campo de busca.
+4. Título e autor continuam travados.
+5. Campos editáveis seguem iguais ao fluxo pesquisado.
+6. Ao salvar, `onSaved(book)` atualiza o estado do editor, chama `refresh()` e incrementa
+   `statusRefreshKey` quando necessário.
+
 Detalhes visuais:
 * Usa tokens Wabi Paper existentes: paper/ink/seal/moss/gradient-progress.
 * A barra de progresso do editor usa transição de 2s para mudanças de largura.
@@ -521,6 +729,11 @@ Detalhes visuais:
   transição de opacidade de 2s, fazendo a cor virar vermelha gradualmente.
 * A capa é maior que no card da home; se não houver coverUrl, usa iniciais como placeholder.
 * O botão "Salvar" abaixo da capa nasce pequeno e cresce até a largura da capa.
+* O botão "Salvar" só deve aparecer quando houver alteração real no formulário.
+* A palavra "Salvar"/"Salvando..." tem uma linha fina animada logo abaixo, criada por
+  `.wa-library-save-label::after`.
+* O placeholder do campo de busca usa medida real do input com ResizeObserver para caber
+  dentro da barra, sem cortar a frase em telas menores.
 
 Classes novas principais:
 * .wa-library-search-main, .wa-library-search, .wa-library-search-top
@@ -529,6 +742,160 @@ Classes novas principais:
 * .wa-library-book-expanded, .wa-library-cover-large, .wa-library-cover-save
 * .wa-library-progress*, .wa-library-form, .wa-library-locked-input
 * .wa-open-book-loader, .wa-open-book, .wa-open-book-page*
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+src/components/StatisticsView.tsx — página de estatísticas (NOVO 27/04/2026)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Objetivo: página completa de estatísticas do acervo, aberta pelo bloco "Estatísticas"
+da home. Mantém o mesmo design Wabi Paper: serifas grandes, labels pequenas espaçadas,
+linhas finas, verde/moss para progresso e baixo ruído visual.
+
+Props:
+```typescript
+interface StatisticsViewProps {
+  refreshKey: number
+  onBackHome: () => void
+  onOpenReading: () => void
+  onOpenAbandoned: () => void
+  onUpdateBook: (book: Book) => void
+  onDeleteBook: (book: Book) => void
+}
+```
+
+Estado interno:
+  panel: 'overview' | 'year-books'
+  selectedYear: number
+  data: PagedBooks | null
+  loading: boolean
+  error: string | null
+
+Busca de dados:
+  - No mount e sempre que `refreshKey` muda, chama:
+    getAllBooks(0, 0, { signal, sortOrder: 'ASC' })
+  - `size=0` significa buscar o acervo completo.
+  - Usa AbortController e ignora AbortError.
+  - Erro visual: "Não consegui carregar as estatísticas do acervo."
+
+Constantes/formatadores:
+  numberFormatter: Intl.NumberFormat('pt-BR')
+  percentFormatter: Intl.NumberFormat('pt-BR', maximumFractionDigits: 0)
+  decimalFormatter: Intl.NumberFormat('pt-BR', maximumFractionDigits: 1)
+  CURRENT_YEAR = new Date().getFullYear()
+  GENRE_COLORS = paleta curta com verdes, ocres, vermelho queimado, cinzas e azul discreto.
+  EMPTY_BOOKS evita recriar array vazio a cada render.
+
+Helpers:
+  parseYear(value)
+    - recebe string de data e devolve o ano ou null.
+  isLeapYear(year)
+    - usado no cálculo de dias do ano.
+  dayOfYear(date)
+    - usado quando o ano selecionado é o ano atual.
+  daysInReferenceYear(year)
+    - ano atual: dias corridos até hoje;
+    - anos anteriores/futuros: 365 ou 366.
+  pagesRead(book)
+    - se status LIDO, usa totalPages primeiro e currentPage como fallback;
+    - caso contrário, usa currentPage.
+  readReferenceYear(book)
+    - só conta livros LIDO;
+    - ano de leitura = endDate ?? updatedAt ?? startDate.
+  collectionReferenceYear(book)
+    - ano de entrada/atualização no acervo = updatedAt ?? startDate ?? endDate.
+    - importante: isso é uma inferência porque o backend ainda não expõe createdAt.
+  uniqueCount(values)
+    - trim + lower pt-BR + Set para contar autores/gêneros únicos sem duplicar por caixa.
+  byGenre(books, onlyRead)
+    - agrupa por gênero;
+    - sem gênero vira `SEM_GENERO` e label "Sem gênero";
+    - ordena por quantidade desc e nome asc;
+    - aplica uma cor da paleta por índice.
+  shortYearLabel(year)
+    - ano atual aparece como "2026 atual", outros como o ano cru.
+
+Componentes internos:
+  HorseShoeGauge({ percent, children })
+    - ferradura SVG para páginas lidas vs páginas totais.
+    - trilha clara + fill com gradiente verde → verde militar.
+    - children ficam centralizados dentro da ferradura.
+  SegmentedHorseShoe({ items })
+    - ferradura segmentada por gênero.
+    - calcula dashLength e offset sem mutar variável externa.
+    - usa intervalo visual pequeno entre segmentos.
+  StatButton({ label, value, sub, onClick })
+    - tile numérico.
+    - se não tiver onClick, fica disabled e não parece ação.
+  GenrePanel({ title, subtitle, items, empty })
+    - painel com ferradura segmentada + legenda.
+    - cada legenda tem bolinha colorida, nome do gênero e quantidade.
+
+Cálculos principais:
+  books = data?.content ?? EMPTY_BOOKS
+  metrics = data?.metrics ?? null
+  years:
+    - começa com CURRENT_YEAR.
+    - adiciona anos de leitura (`readReferenceYear`) e anos do acervo (`collectionReferenceYear`).
+    - ordena desc.
+  hasPastYears:
+    - true se existir ano menor que CURRENT_YEAR.
+    - só mostra carrossel de anos quando há histórico anterior.
+  selectedReadBooks:
+    - livros LIDO cujo ano de leitura bate com selectedYear.
+  selectedCollectionBooks:
+    - livros cujo ano inferido de entrada/atualização bate com selectedYear.
+  selectedPagesRead:
+    - soma pagesRead dos selectedReadBooks.
+  averagePagesPerDay:
+    - selectedPagesRead / dias do ano de referência.
+  progressPercent:
+    - metrics.trackedPages / metrics.totalPages * 100.
+  authorCount:
+    - autores únicos do acervo inteiro.
+  genreStats:
+    - gêneros do acervo inteiro.
+  readGenreStats:
+    - livros LIDO agrupados por gênero.
+  genreCount:
+    - quantidade de gêneros, excluindo `SEM_GENERO`.
+
+Renderização — overview:
+  - main `.wa-stats-page-main` + section `.wa-stats-page`.
+  - topo reaproveita `.wa-reading-page-top` com seta minimalista à esquerda.
+  - label "Painel do acervo" + título "Estatísticas".
+  - carrossel `.wa-year-carousel` de `.wa-year-chip` aparece só se houver anos anteriores.
+  - loading mostra "Calculando estatísticas...".
+  - erro mostra bloco `.wa-state-error`.
+  - grid `.wa-stat-grid` com:
+    Acervo: número; clique volta para home.
+    Lendo: número; clique abre lista LENDO se > 0.
+    Abandonados: número; clique abre lista ABANDONADO se > 0.
+    Lidos em {ano}: número.
+    Páginas em {ano}: número.
+    Autores: número.
+  - `.wa-stat-feature-grid` com:
+    Leitura do acervo: ferradura de páginas com porcentagem e "lidas / total".
+    Ritmo diário: média de páginas por dia no ano selecionado.
+    Livros que entraram: botão que troca para panel='year-books'.
+  - `.wa-stat-genre-grid` com:
+    Gêneros no acervo;
+    Quais gêneros;
+    Lidos por gênero.
+
+Renderização — panel year-books:
+  - mantém o mesmo shell visual da stats.
+  - seta volta para `overview`.
+  - label "Entraram no acervo" + título com o ano selecionado.
+  - se não houver livros, mostra estado vazio.
+  - se houver, renderiza `.wa-grid` com `BookCard`.
+  - `BookCard` preserva hover/focus com "Atualizar" e "Apagar".
+  - `Atualizar` volta para BookList, que abre LibrarySearchView com retorno para `stats`.
+  - `Apagar` usa DeleteBookDialog compartilhado em BookList.
+
+Observação importante:
+  - Para estatística "livros que entraram no acervo", o ideal futuro é o backend expor
+    `createdAt`. Hoje o front usa `updatedAt` e cai para datas de leitura porque era o
+    melhor dado disponível.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 src/components/NewBookModal.tsx — estrutura completa (NOVO 21/04/2026 s2)
@@ -699,11 +1066,14 @@ Melhorias futuras (baixa prioridade):
 O QUE NÃO EXISTE NO FRONTEND (ainda)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-* Filtros por status de leitura
+* Filtro livre por status dentro da coleção principal da home.
+  Observação: existem fluxos dedicados para LENDO e ABANDONADO a partir das métricas.
 * Skeleton loading
 * Roteamento (React Router não instalado, app é single page)
 * Edição de Edition existente via PATCH /editions/{id}
 * Histórico/listagem de edições de um mesmo livro
+* Data real de entrada no acervo (`createdAt`) vinda do backend.
+  A página de estatísticas infere "livros que entraram" com `updatedAt`/datas de leitura.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 HISTÓRICO DE SESSÕES
@@ -1011,3 +1381,302 @@ HISTÓRICO DE SESSÕES
   - npm run lint OK
   - npm run build OK
 * O servidor web não foi iniciado automaticamente.
+
+26/04/2026 — Página dedicada para livros em leitura
+* Contexto humano: Diego relatou estar com a depressão atacada e pediu que a IA fizesse
+  diretamente as alterações no front e no back, lendo as memórias antes.
+* Esclarecimento posterior de Diego: isso deve ser entendido como um FLUXO, não como
+  páginas soltas. O fluxo esperado é:
+  home → clique no contador "Lendo" → página/lista de livros em leitura → clique em card
+  → página de edição daquele livro → salvar alterações → estado atualizado preservado
+  no fluxo e refletido na home/lista.
+* Problema identificado:
+  - O contador "Lendo" na home já era clicável quando havia pelo menos 1 livro em leitura,
+    mas abria um modal antigo (`ReadingModal`), que não era o comportamento desejado.
+* Novo comportamento implementado:
+  - Ao clicar no status "Lendo" da home, o app abre uma página própria de livros em leitura.
+  - A página mostra a label "Livros que você está lendo" no topo esquerdo.
+  - A lista usa o mesmo `BookCard` e o mesmo grid visual da home.
+  - A lista busca diretamente do backend com `status=LENDO`, sem buscar todos os livros
+    para filtrar no front.
+  - A ordenação usa o mesmo mecanismo visual da home: "Crescente ↑", "Decrescente ↓"
+    e "Aleatório".
+  - ASC/DESC agora são enviados para o backend e correspondem à data de última atualização
+    do Book (`updatedAt`), implementada no backend nesta mesma tarefa.
+  - A seta de voltar para a home existe na página de lista, mas a label permanece como
+    primeiro elemento visual no topo esquerdo, conforme o pedido.
+* Edição a partir da lista:
+  - Ao clicar em um card da página "Em leitura", o app abre a mesma tela/editor usado
+    na busca de acervo, mas em modo direto.
+  - Nesse modo direto, a barra superior de pesquisa não aparece.
+  - Fica apenas a seta minimalista para voltar à página anterior.
+  - O editor mantém o comportamento anterior: título e autor são somente leitura;
+    os demais campos editáveis podem ser salvos pelo botão animado abaixo da capa.
+  - Ao salvar, a home é atualizada e o livro selecionado passa a refletir a resposta
+    retornada pelo backend.
+* Alterações técnicas:
+  - `LibrarySearchView` ganhou `initialBook`, permitindo reutilizar o editor sem busca.
+  - `BookList` passou a ter views: `home`, `search`, `reading-list` e `reading-edit`.
+  - `ReadingModal` foi removido e substituído por `ReadingBooksPage`.
+  - `getAllBooks()` agora aceita opções opcionais `sortOrder`, `status` e `signal`,
+    preservando compatibilidade com chamadas antigas por `AbortSignal`.
+  - `useBooks(sortOrder)` agora envia a ordenação para o backend, corrigindo a ordenação
+    real da home também.
+  - `Book` ganhou o campo opcional `updatedAt`.
+  - `vite.config.ts` foi ajustado para tipar a configuração do Vitest sem quebrar o build
+    TypeScript.
+* Validação:
+  - npm run lint OK.
+  - npm run build OK.
+  - npm run test OK: 2 arquivos de teste, 33 testes passando.
+  - O pacote opcional `@rollup/rollup-darwin-arm64` estava faltando/vazio no node_modules;
+    foi reinstalado com `npm install --no-save @rollup/rollup-darwin-arm64@4.60.2`
+    para destravar o Vitest. `package-lock.json` permaneceu sem alteração final.
+  - A porta 8081 estava ocupada por processos locais; eles foram encerrados e a porta
+    ficou livre ao final, respeitando a regra de não deixar o web rodando.
+
+27/04/2026 — Régua do input de pesquisa não invade caracteres
+* Diego enviou print da tela "Pesquisar no acervo" mostrando que caracteres grandes
+  da busca encostavam/invadiam a linha inferior do input.
+* Diagnóstico: a linha era `border-bottom` do próprio `.wa-library-search-input`, então
+  ficava visualmente grudada na base dos caracteres em textos grandes.
+* Correção aplicada em `src/index.css`:
+  - removido `border-bottom` do input;
+  - criada uma régua separada com `.wa-library-search-field::after`;
+  - adicionados 12px de respiro entre o texto e a régua;
+  - `line-height` do input aumentou de 1.05 para 1.12 para dar mais folga vertical.
+* Resultado esperado: a linha fica mais baixa e elegante, sem que números, pontuação
+  ou descendentes de letras encostem nela.
+* Validação:
+  - npm run lint OK.
+  - npm run build OK.
+  - O servidor Vite não foi iniciado.
+
+27/04/2026 — Seta de retorno e placeholder responsivo da busca
+* Diego apontou mais dois problemas visuais na tela "Pesquisar no acervo":
+  - a seta de retorno parecia um caractere estranho, não uma seta clara;
+  - o placeholder "Título, autor, editora, ISBN ou gênero" não cabia no campo e aparecia
+    truncado como "Título, autor, editora, ISBN ou g".
+* Correção da seta:
+  - `.wa-library-back` deixou de depender visualmente do caractere `‹`;
+  - a seta agora é desenhada por CSS com uma linha horizontal e uma ponta minimalista,
+    usando `::before` e `::after`;
+  - o `span` antigo continua no DOM apenas como fallback estrutural, mas fica oculto.
+* Correção do placeholder:
+  - `LibrarySearchView` agora mede a largura real do input com `ResizeObserver`;
+  - usa canvas para medir a largura do texto do placeholder na fonte atual;
+  - define a variável CSS `--library-search-placeholder-size` dinamicamente;
+  - `.wa-library-search-input::placeholder` usa essa variável para reduzir o tamanho
+    da frase quando necessário, garantindo que ela caiba na barra.
+* Validação:
+  - npm run lint OK.
+  - npm run build OK.
+  - O servidor Vite não foi iniciado.
+
+27/04/2026 — Refinos de salvar, seta em leitura e hover dos cards
+* Diego pediu três refinamentos visuais:
+  - quando algum campo é alterado e o botão "Salvar" aparece, deve existir uma animação
+    logo abaixo da palavra "Salvar";
+  - na página dos livros com status LENDO, a seta de retorno estava à direita, mas deve
+    ficar à esquerda, ao lado esquerdo do título "Em leitura";
+  - ao passar o mouse por cima dos cards na home ou na página de livros em leitura, o card
+    deve aumentar levemente, em torno de 5%, para dar mais elegância.
+* Correções aplicadas:
+  - `LibrarySearchView` passou a renderizar o texto do botão em `.wa-library-save-label`.
+  - `.wa-library-save-label::after` desenha uma linha fina animada abaixo de "Salvar" /
+    "Salvando...", com keyframe `wa-library-save-line`.
+  - `ReadingBooksPage` reposicionou a seta antes do bloco de título.
+  - `.wa-reading-page-top` voltou a usar grid `56px minmax(0, 1fr)`, deixando a seta à
+    esquerda do título.
+  - `.wa-card` ganhou `transform: scale(1.05)` no hover, `z-index` elevado e transição
+    suave, sem alterar o fluxo do grid.
+* Validação:
+  - npm run lint OK.
+  - npm run build OK.
+  - O servidor Vite não foi iniciado.
+
+27/04/2026 — Abandonados na home, estatísticas e linhas estáveis
+* Diego apontou que, depois do hover com aumento dos cards, as linhas internas do grid
+  pareciam ter espessuras divergentes.
+* Diagnóstico:
+  - O hover estava aplicando `transform: scale(1.05)` no `.wa-card` inteiro.
+  - Como a borda fazia parte do elemento escalado, a linha de 1px também era escalada
+    visualmente, criando a sensação de linhas mais finas/grossas.
+* Correção das linhas:
+  - `.wa-card` deixou de escalar.
+  - O hover agora escala apenas `.wa-card-grid`, ou seja, o conteúdo interno do card.
+  - As bordas do grid permanecem estáveis em 1px, enquanto o conteúdo ainda cresce 5%.
+* Métrica "Abandonados":
+  - A home ganhou o item "Abandonados" ao lado de "Lidos".
+  - O valor usa `metrics.abandonedBooks`, já fornecido pelo backend.
+  - Quando o número é maior ou igual a 1, o item fica clicável.
+  - O fluxo é idêntico ao de "Lendo":
+    home → clique em "Abandonados" → lista filtrada por status ABANDONADO → clique no card
+    → página de edição sem barra de busca → salvar → voltar preservando o fluxo.
+* Refatoração do fluxo por status:
+  - `ReadingBooksPage` foi generalizada para `StatusBooksPage`.
+  - Criado `StatusFlow = 'reading' | 'abandoned'`.
+  - `STATUS_FLOW_CONTENT` centraliza status, títulos, labels, mensagens de vazio e erro.
+  - `BookList` agora usa views `status-list` e `status-edit`, reaproveitando o mesmo
+    fluxo para LENDO e ABANDONADO.
+* Estatísticas:
+  - A home ganhou um novo item "Estatísticas" ao lado de "Páginas".
+  - O item segue o mesmo padrão visual das métricas.
+  - Abaixo da palavra "Estatísticas" aparece um gráfico minimalista em SVG, com eixos,
+    barras e uma linha no estilo do Wabi Paper.
+* Linhas da home:
+  - O grid de métricas passou de 4 para 6 colunas no desktop.
+  - Cada item continua separado por linha minimalista.
+  - Foi adicionada uma linha abaixo do bloco de métricas, espelhando a linha acima.
+  - Responsivo ajustado para 3 colunas em telas médias e 2 colunas no mobile.
+* Validação:
+  - npm run lint OK.
+  - npm run build OK.
+  - npm run test OK: 2 arquivos, 33 testes passando.
+  - O servidor Vite não foi iniciado.
+
+27/04/2026 — Cards com Atualizar/Apagar e exclusão animada
+* Diego pediu novo refinamento:
+  - a linha abaixo das métricas da home deveria ficar desconectada do bloco do mesmo modo
+    que a linha de cima, com a mesma distância;
+  - remover a ficha lateral que aparecia ao clicar no card;
+  - no hover do card, exibir abaixo da capa um botão verde "Atualizar" e, abaixo dele,
+    um botão vermelho "Apagar";
+  - "Atualizar" deve abrir o mesmo fluxo de edição/salvamento já usado para livros;
+  - "Apagar" deve pedir confirmação e, ao confirmar, mostrar um alerta central animado
+    vermelho formando um círculo e depois um X; ao terminar, o alerta some e a lista atualiza.
+* Mudanças aplicadas no front:
+  - `BookCard` deixou de receber `onClick` e passou a receber `onUpdate` e `onDelete`.
+  - O card não abre mais `DetailSheet`; os botões de ação aparecem com transição no hover/focus.
+  - `BookList` removeu o estado `selectedBook` e não renderiza mais `DetailSheet`.
+  - `BookList` ganhou estado de edição direta reutilizável:
+    `editingBook`, `editReturnView`, `statusRefreshKey`.
+  - Ao clicar em "Atualizar" na home, abre `LibrarySearchView` com `initialBook` e volta para home.
+  - Ao clicar em "Atualizar" em listas de status, abre o mesmo editor e volta para a lista anterior.
+  - Criado `DeleteBookDialog` inline em `BookList`, com:
+    confirmação central;
+    estado `deleting` sem os botões de confirmação, para a confirmação desaparecer após o sim;
+    estado `deleted` com SVG vermelho animado em círculo + X;
+    fechamento automático após 1,5s.
+  - `booksApi.ts` ganhou `deleteBook(bookId)` usando `DELETE /api/books/{id}`.
+  - Após apagar, a home chama `refresh()` e as listas por status incrementam `statusRefreshKey`.
+  - `.wa-hero-metrics-rule` passou a `margin: 40px 0 0`, espelhando o respiro superior.
+* Mudanças de CSS:
+  - `.wa-card-cover-column` organiza capa e ações.
+  - `.wa-card-actions` fica invisível por padrão e surge no hover/focus sem deslocar bordas.
+  - Em dispositivos sem hover, as ações ficam visíveis para não bloquear uso por toque.
+  - `.wa-card-action-update` usa verde/moss; `.wa-card-action-delete` usa vermelho/seal.
+  - `.wa-delete-*` define a confirmação e a animação vermelha de exclusão.
+* Testes:
+  - `BookCard.test.tsx` agora valida os botões Atualizar/Apagar em vez do clique no card.
+  - `booksApi.test.ts` cobre `deleteBook()` em sucesso, erro com mensagem do backend e erro padrão.
+* Validação:
+  - npm test OK: 2 arquivos, 37 testes passando.
+  - npm run build OK.
+  - O servidor Vite não foi iniciado nesta validação.
+
+27/04/2026 — Aleatório reexecutável e modal "Me indique um livro"
+* Diego pediu dois refinamentos:
+  - trocar a label "Aleatória" para "Aleatório";
+  - toda vez que clicar em "Aleatório", mesmo se ele já estiver selecionado, a lista deve
+    retornar uma nova ordem aleatória;
+  - entre "Páginas" e "Estatísticas", adicionar a opção "Me indique um livro";
+  - ao clicar nessa opção, abrir um alerta/modal com um livro aleatório do acervo;
+  - a indicação só pode usar livros com status `NAO_LIDO`;
+  - no hover do livro indicado deve aparecer abaixo da capa a ação "Atualizar para lendo";
+  - ao clicar nessa ação, o status do livro muda para `LENDO`;
+  - o modal também deve ter "Me indique outro" e um X no canto superior direito para fechar.
+* Implementação:
+  - `SortSwitcher` mudou a label de `RANDOM` para "Aleatório".
+  - `handleSetSortOrder()` agora detecta clique repetido em `RANDOM`; quando isso acontece,
+    chama `refresh()` na home e incrementa `statusRefreshKey` para listas por status.
+  - A home ganhou `RecommendationMetric`, renderizada entre "Páginas" e "Estatísticas".
+  - O grid de métricas passou para 7 colunas no desktop.
+  - Criado `RecommendationDialog` inline em `BookList`.
+  - `RecommendationDialog` usa `getAllBooks(0, 20, { sortOrder: 'RANDOM', status: 'NAO_LIDO' })`
+    para buscar candidatos não lidos.
+  - O botão "Me indique outro" refaz a busca e tenta evitar repetir imediatamente o livro atual.
+  - A ação "Atualizar para lendo" usa `updateBook(id, dto)` com o DTO construído a partir
+    do próprio Book e sobrescrevendo apenas `status: 'LENDO'`.
+  - Ao atualizar para LENDO, a home recarrega com `refresh()` e as listas por status também
+    são invalidadas via `statusRefreshKey`.
+* CSS:
+  - `.wa-recommendation-metric` estiliza a nova métrica/opção da home no Wabi Paper.
+  - `.wa-recommendation-*` define o modal, card indicado, capa, botão de hover e estados.
+  - Em dispositivos sem hover, "Atualizar para lendo" fica visível para permitir toque.
+* Validação:
+  - npm test OK: 2 arquivos, 37 testes passando.
+  - npm run build OK.
+  - npm run lint OK.
+  - O servidor Vite não foi iniciado.
+
+27/04/2026 — Página de estatísticas do acervo
+* Diego pediu uma nova página ao clicar em "Estatísticas" na home e deixou liberdade
+  criativa para organizar a experiência.
+* Entrada no fluxo:
+  - `StatisticsMetric` na home agora é um botão.
+  - Ao clicar, `BookList` muda para `view === 'stats'`.
+  - A página tem seta para voltar à home.
+* Novo componente:
+  - Criado `src/components/StatisticsView.tsx`.
+  - Ele busca o acervo inteiro com `getAllBooks(0, 0, { sortOrder: 'ASC' })`.
+  - O componente calcula estatísticas localmente a partir de `Book[]` e `metrics`.
+* Estatísticas exibidas:
+  - Total de livros no acervo: número; clique volta para a home.
+  - Total de livros lendo: número; clique abre o fluxo/lista de livros LENDO.
+  - Total de livros abandonados: número; clique abre o fluxo/lista de livros ABANDONADO.
+  - Páginas lidas / total de páginas: ferradura com gradiente verde → verde militar,
+    porcentagem central e texto `páginas lidas / páginas no acervo`.
+  - Livros lidos no ano selecionado.
+  - Páginas lidas no ano selecionado.
+  - Média de páginas lidas por dia no ano selecionado.
+  - Número de autores no acervo.
+  - Número de gêneros no acervo.
+  - Quais gêneros no acervo: ferradura segmentada + legenda com bolinhas coloridas.
+  - Livros lidos por gênero: ferradura segmentada + legenda.
+  - Livros que entraram no acervo no ano selecionado: número clicável que abre uma lista
+    de cards no mesmo estilo da home.
+* Anos/histórico:
+  - A página monta os anos a partir de `endDate`, `updatedAt` e `startDate`.
+  - O ano atual é selecionado por padrão.
+  - Se houver anos anteriores, aparece um carrossel horizontal de caixinhas de ano no topo.
+  - Se não houver anos anteriores, o carrossel não é mostrado.
+* Observação importante de dados:
+  - O backend ainda não tem `createdAt`.
+  - Para "livros que entraram no acervo", a referência usada é `updatedAt`; se ausente,
+    cai para `startDate` e depois `endDate`.
+  - Isso é uma inferência técnica com os dados existentes; se Diego quiser precisão real
+    de entrada no acervo no futuro, será melhor adicionar `createdAt` ao backend.
+* Lista de livros por ano:
+  - Dentro de `StatisticsView`, clicar em "Livros que entraram" muda para o painel interno
+    `year-books`.
+  - A lista usa `BookCard`, preservando ações de hover "Atualizar" e "Apagar".
+  - "Atualizar" abre `LibrarySearchView` e volta para `stats`.
+  - "Apagar" usa o mesmo `DeleteBookDialog` da home.
+* CSS:
+  - `.wa-stats-*` define layout da página, tiles numéricos e painéis.
+  - `.wa-horseshoe-*` define a ferradura de páginas, com gradiente SVG verde.
+  - `.wa-segmented-*` define ferraduras segmentadas por gênero.
+  - `.wa-year-carousel` e `.wa-year-chip` definem o histórico rolável de anos.
+* Validação:
+  - npm run build OK.
+  - npm run lint OK.
+  - npm test OK: 2 arquivos, 37 testes passando.
+  - A porta 8081 foi checada e ficou livre ao final.
+
+27/04/2026 — Memória do front detalhada
+* Diego pediu para atualizar a memória do front com o máximo de detalhe possível.
+* Atualização feita neste BANK-MEMORY:
+  - árvore de componentes mantida com `StatisticsView.tsx`;
+  - seção de classes `.wa-*` ampliada com home, cards, paginação, busca/edição,
+    recomendação, exclusão e estatísticas;
+  - `src/types/Book.ts` atualizado com `updatedAt?: string | null` e observação sobre
+    métricas globais vindas do backend;
+  - `src/pages/BookList.tsx` reescrito na memória para refletir os fluxos atuais:
+    home, pesquisa, lista por status, edição direta, estatísticas, indicação aleatória
+    e exclusão animada;
+  - `src/components/LibrarySearchView.tsx` atualizado com `initialBook`, retorno por view,
+    botão Salvar condicional e animação abaixo do texto do botão;
+  - criada seção detalhada de `src/components/StatisticsView.tsx`, incluindo props,
+    estado, helpers, cálculos, renderização e a limitação atual de `createdAt`.
+* Nenhum código de aplicação foi alterado nesta etapa; apenas documentação/memória.
